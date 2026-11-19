@@ -45,8 +45,36 @@ document.addEventListener('keydown', (ev) => {
   if (ev.ctrlKey && /^[1-4]$/.test(ev.key)) {
     ev.preventDefault();
     showTab(TABS[Number(ev.key) - 1]);
+  } else if (ev.key === 'F1') {
+    ev.preventDefault();
+    openInfo('help');
   }
 });
+
+// ---------- help and about (BBR-32) ----------
+
+const INFO_DIALOGS = ['help', 'about'];
+
+/** Open the Help or About dialog; the other one closes, and opening one already open is a no-op. */
+function openInfo(name) {
+  if (!INFO_DIALOGS.includes(name)) return;
+  for (const other of INFO_DIALOGS) if (other !== name && $(`${other}Dialog`).open) $(`${other}Dialog`).close();
+  const d = $(`${name}Dialog`);
+  if (!d.open) d.showModal();
+  d.querySelector('.dlg-body').scrollTop = 0;
+}
+$('btnHelp').onclick = () => openInfo('help');
+$('btnAbout').onclick = () => openInfo('about');
+$('btnHelpAbout').onclick = () => openInfo('about');
+$('btnHelpClose').onclick = () => $('helpDialog').close();
+$('btnAboutClose').onclick = () => $('aboutDialog').close();
+// Links name a key in core/about.js; main opens it in the system browser, and refuses any other.
+for (const b of document.querySelectorAll('[data-link]')) {
+  b.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    bridge.openLink(b.dataset.link).catch((err) => addFlash('bad', cleanError(err.message)));
+  });
+}
 
 // ---------- message bars ----------
 
@@ -530,6 +558,17 @@ $('btnRemoveConfirm').onclick = async () => {
 
 // ---------- start ----------
 
+/** The About dialog's text, from main (core/about.js), so the page holds no version or URL of its own. */
+function fillAbout(info) {
+  $('aboutName').textContent = info.name;
+  $('aboutVersion').textContent = info.version;
+  $('aboutDescription').textContent = info.description;
+  $('aboutLicense').textContent = `${info.license} License`;
+  $('helpBrowseVersion').textContent = info.browseVersion;
+  if (info.icon) $('aboutIcon').src = info.icon;
+  for (const l of info.links) for (const b of document.querySelectorAll(`[data-link="${l.key}"]`)) b.title = l.url;
+}
+
 async function refresh() {
   state = await bridge.state();
   render();
@@ -537,8 +576,9 @@ async function refresh() {
 
 // The tray's per-host items (Show logs, Pair browser…) bring the window up on that host.
 // Registered before the first await so a request sent right after load is not dropped.
-bridge.onSelect(async ({ id, tab } = {}) => {
+bridge.onSelect(async ({ id, tab, dialog } = {}) => {
   await ready;
+  if (dialog) return openInfo(dialog);
   if (hostById(state, id)) select(id);
   if (tab && TABS.includes(tab)) showTab(tab);
   if (tab === 'log' && logView === 'all') showLog('host');
@@ -553,6 +593,7 @@ const ready = (async () => {
   if (selected()?.overall === 'unconfigured') showTab('settings');
   $('autostart').checked = await bridge.autostart();
   $('sbVersion').textContent = await bridge.version();
+  fillAbout(await bridge.about());
   for (const e of await bridge.log()) appLog.push(e);
   showLog('host');
   bridge.onState((snap) => {

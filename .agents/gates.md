@@ -46,7 +46,11 @@ signal that pid. Never kill by name. A leaked ssh ControlMaster shows up as
   the second host and writes `<prefix>-host2.png`, `<prefix>-host2-log.png`
   and `second` (that render's text) in the JSON. `BB_SMOKE_INVALID=1` submits
   an Add Host form whose id clashes with the first host's and records the
-  inline error under `invalid`; the config refuses it before writing.
+  inline error under `invalid`; the config refuses it before writing. Last,
+  it opens the Help and About dialogs, writes `<prefix>-help.png` and
+  `<prefix>-about.png`, and records each dialog's text under `dialogs` (a
+  closed `<dialog>` is not in `text`, so check `dialogs`, and that `about`
+  shows a version).
 - **Render with a throwaway config**, never your own: write
   `<tmp>/xdg/browse-bridge/config.json` (hosts with `autoConnect: false` and
   `.invalid` ssh hosts) and run with `XDG_CONFIG_HOME=<tmp>/xdg HOME=<tmp>/home`.

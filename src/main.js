@@ -8,6 +8,7 @@ import { HOST_ACTIONS, HostManager, runHostAction } from './core/hosts.js';
 import { autostartArgv, isAutostartEnabled, setAutostart, startsHidden } from './core/autostart.js';
 import { HostNotifier, TrayRenderer, coalesce, trayView } from './core/tray.js';
 import { readVersion } from './core/version.js';
+import { aboutInfo, linkUrl } from './core/about.js';
 import { iconPng, trayIconPng } from './icons.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -161,7 +162,14 @@ async function smoke(outPrefix) {
     await shot('invalid', 800);
     invalid = await js(`[...document.querySelectorAll('.field-error:not([hidden]), #formError:not([hidden])')].map((e) => (e.id || '') + ': ' + e.textContent)`);
   }
-  writeFileSync(`${outPrefix}.json`, JSON.stringify({ text, second, invalid, errors, tray: Boolean(tray), snapshot: hosts.snapshot() }, null, 2));
+  // The Help and About dialogs: a closed <dialog> is not in innerText, so each is read while open.
+  const dialogs = {};
+  for (const name of ['help', 'about']) {
+    win.webContents.send('select', { dialog: name });
+    await shot(name, 600);
+    dialogs[name] = await js(`(() => { const d = document.getElementById('${name}Dialog'); const t = d.open ? d.innerText : null; d.close(); return t; })()`);
+  }
+  writeFileSync(`${outPrefix}.json`, JSON.stringify({ text, second, invalid, dialogs, errors, tray: Boolean(tray), snapshot: hosts.snapshot() }, null, 2));
   await quit();
 }
 
@@ -203,6 +211,8 @@ const APP_ACTIONS = {
   autostart: (item) => { setAutostart(item.checked, launchArgv()); trayUpdate.run(); },
   quit: () => quit(),
   showLogs: (_item, id) => showWindow({ id, tab: 'log' }),
+  showHelp: () => showWindow({ dialog: 'help' }),
+  showAbout: () => showWindow({ dialog: 'about' }),
 };
 
 /** core/tray.js's plain menu model → an Electron Menu, with the clicks attached here. */
@@ -259,6 +269,9 @@ function showWindow(focus = null) {
     },
   });
   win.setMenu(null);
+  // The window shows only its own page: links go out through openLink (core/about.js), never by navigating.
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.loadFile(join(here, 'ui', 'index.html'));
   if (focus) win.webContents.once('did-finish-load', select);
   // Closing the window keeps the tunnel running in the tray.
@@ -288,6 +301,13 @@ function registerIpc() {
   ipcMain.handle('state', () => hosts.snapshot());
   ipcMain.handle('log', () => logger.ring);
   ipcMain.handle('version', () => appVersion);
+  ipcMain.handle('about', () => ({ ...aboutInfo({ version: appVersion }), icon: `data:image/png;base64,${iconPng('ready', 96).toString('base64')}` }));
+  // The page names a link by key; only a key core/about.js lists opens, in the system browser.
+  ipcMain.handle('openLink', (_e, key) => {
+    const url = linkUrl(key);
+    if (!url) throw new Error(`unknown link: ${String(key).slice(0, 40)}`);
+    return shell.openExternal(url);
+  });
   // Every per-host action names its host; an unknown id is an error, never the first host.
   for (const action of Object.keys(HOST_ACTIONS)) {
     ipcMain.handle(action, (_e, id) => runHostAction(hosts, action, id));
