@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>browse-bridge</title>
+<style>
+  /* Breeze (KDE Plasma) palette. Follows the system light/dark preference. */
+  :root {
+    --window: #eff0f1; --view: #fcfcfc; --alt: #f5f6f7; --text: #232627; --muted: #707d8a;
+    --border: #bcbebf; --frame: #d1d5d9; --button: #fcfcfc; --button-hover: #f2f3f4;
+    --hl: #3daee9; --hl-soft: rgba(61, 174, 233, .16); --hl-text: #fcfcfc;
+    --ok: #27ae60; --warn: #f67400; --bad: #da4453;
+    --ok-bg: rgba(39, 174, 96, .12); --warn-bg: rgba(246, 116, 0, .12); --bad-bg: rgba(218, 68, 83, .12); --info-bg: rgba(61, 174, 233, .12);
+    --mono: "Hack", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --window: #202326; --view: #141618; --alt: #1b1d20; --text: #fcfcfc; --muted: #a1a9b1;
+      --border: #4b4f53; --frame: #3a3e42; --button: #292c30; --button-hover: #31353a;
+      --hl: #3daee9; --hl-soft: rgba(61, 174, 233, .22); --hl-text: #fcfcfc;
+      --ok: #27ae60; --warn: #f67400; --bad: #da4453;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  [hidden] { display: none !important; }
+  body {
+    display: flex; flex-direction: column;
+    background: var(--window); color: var(--text);
+    font: 10pt "Noto Sans", system-ui, sans-serif;
+    user-select: none; cursor: default; overflow: hidden;
+  }
+  .selectable, input, pre, .mono { user-select: text; }
+  .mono { font-family: var(--mono); font-size: 9.5pt; }
+  svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Toolbar */
+  .toolbar { display: flex; align-items: center; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--frame); }
+  .tb { display: inline-flex; align-items: center; gap: 6px; height: 30px; white-space: nowrap; padding: 0 9px; border: 1px solid transparent; border-radius: 3px; background: none; color: var(--text); font: inherit; }
+  .tb:hover:not(:disabled) { border-color: var(--border); background: var(--button-hover); }
+  .tb:active:not(:disabled) { background: var(--hl-soft); border-color: var(--hl); }
+  .tb:focus-visible { outline: none; border-color: var(--hl); }
+  .tb:disabled { opacity: .45; }
+  .tb-sep { width: 1px; height: 20px; background: var(--frame); margin: 0 4px; }
+  .spacer { flex: 1; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; height: 24px; white-space: nowrap; }
+  /* Narrow window: toolbar goes icon-only (labels stay as tooltips), the status bar still names the state. */
+  @media (max-width: 700px) { .pill { display: none; } }
+  @media (max-width: 560px) { .tb span { display: none; } .tb { padding: 0 7px; } }
+  .glyph { font-family: var(--mono); width: 14px; text-align: center; }
+
+  /* Message bars (KMessageWidget) */
+  #messages:empty { display: none; }
+  #messages { padding: 6px 8px 0; display: grid; gap: 6px; }
+  .msg { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border: 1px solid; border-radius: 3px; }
+  .msg p { margin: 0; flex: 1; overflow-wrap: anywhere; }
+  .msg.info { border-color: var(--hl); background: var(--info-bg); }
+  .msg.ok { border-color: var(--ok); background: var(--ok-bg); }
+  .msg.warn { border-color: var(--warn); background: var(--warn-bg); }
+  .msg.bad { border-color: var(--bad); background: var(--bad-bg); }
+  .msg .x { border: none; background: none; color: var(--muted); font-size: 14px; line-height: 1; padding: 0 2px; }
+  .msg .x:hover { color: var(--text); }
+
+  /* Tabs (Plasma style: highlight line under the active tab) */
+  .tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--frame); }
+  .tab { border: none; background: none; color: var(--muted); font: inherit; padding: 6px 12px 7px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab:hover { color: var(--text); }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--hl); }
+  .tab:focus-visible { outline: 1px solid var(--hl); outline-offset: -2px; }
+
+  /* Pages */
+  .pages { flex: 1; overflow: hidden; min-height: 0; }
+  .page { height: 100%; overflow: auto; padding: 14px 16px; }
+  .page[hidden] { display: none; }
+
+  /* KDE form layout: right-aligned labels */
+  .form { display: grid; grid-template-columns: max-content 1fr; gap: 7px 12px; align-items: baseline; }
+  .form > .label { text-align: right; color: var(--muted); }
+  .form > .value { overflow-wrap: anywhere; }
+  .heading { display: flex; align-items: center; gap: 8px; font-size: 12pt; font-weight: 600; margin: 0 0 12px; }
+  .s-ready { color: var(--ok); } .s-warning, .s-needsPairing, .s-relayIdle { color: var(--warn); }
+  .s-error { color: var(--bad); } .s-connecting, .s-unknown, .s-stopped, .s-unconfigured { color: var(--muted); }
+  .section { font-weight: 600; margin: 16px 0 8px; }
+  .muted { color: var(--muted); }
+
+  /* Frames, buttons, inputs */
+  .frame { background: var(--view); border: 1px solid var(--frame); border-radius: 3px; }
+  button.btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: 3px; background: var(--button); color: var(--text); font: inherit; }
+  button.btn:hover:not(:disabled) { border-color: var(--hl); }
+  button.btn:focus-visible { outline: none; border-color: var(--hl); box-shadow: 0 0 0 1px var(--hl); }
+  button.btn.default { border-color: var(--hl); }
+  button.btn:disabled { opacity: .45; }
+  input[type=text], input[type=number] { height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--view); color: var(--text); font: inherit; width: 100%; }
+  input[type=text]:focus, input[type=number]:focus { outline: none; border-color: var(--hl); }
+  input[type=checkbox] { accent-color: var(--hl); margin: 0 6px 0 0; }
+  .check { display: inline-flex; align-items: center; }
+  .buttons { display: flex; justify-content: flex-end; gap: 6px; margin-top: 16px; }
+
+  /* Traffic */
+  .chart { width: 100%; height: 110px; display: block; }
+  .legend { display: flex; gap: 14px; font-size: 9pt; color: var(--muted); margin: 4px 2px 0; }
+  .sw { display: inline-block; width: 14px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 5px; }
+  .sw.up { border-color: var(--hl); } .sw.down { border-color: var(--ok); border-top-style: dashed; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-weight: normal; color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--frame); background: var(--alt); position: sticky; top: 0; }
+  td { padding: 3px 8px; font-family: var(--mono); font-size: 9pt; white-space: nowrap; }
+  tr:nth-child(even) td { background: var(--alt); }
+  td.num, th.num { text-align: right; }
+  .tablewrap { max-height: 190px; overflow: auto; }
+
+  /* Log */
+  .logbar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .seg button { border: none; background: var(--button); color: var(--text); font: inherit; height: 26px; padding: 0 10px; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed="true"] { background: var(--hl); color: var(--hl-text); }
+  #logPage { display: grid; grid-template-rows: auto 1fr; }
+  #logPage[hidden] { display: none; }
+  pre.log { margin: 0; padding: 6px 8px; font: 9pt/1.45 var(--mono); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; min-height: 0; }
+  .lvl-warn { color: var(--warn); } .lvl-error { color: var(--bad); }
+
+  /* Host list: a sidebar like System Settings' — view background, highlight-filled selection */
+  .main { flex: 1; display: flex; min-height: 0; }
+  .content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .sidebar { width: 200px; flex: none; display: flex; flex-direction: column; background: var(--view); border-right: 1px solid var(--frame); }
+  .sidebar-title { padding: 8px 10px 4px; color: var(--muted); font-size: 9pt; }
+  .hostlist { flex: 1; overflow: auto; margin: 0; padding: 2px 4px; list-style: none; }
+  .hostrow { display: grid; grid-template-columns: 16px 1fr; gap: 1px 6px; align-items: baseline; padding: 5px 7px; border: 1px solid transparent; border-radius: 3px; }
+  .hostrow + .hostrow { margin-top: 1px; }
+  .hostrow:hover { background: var(--hl-soft); }
+  .hostrow:focus-visible { outline: none; border-color: var(--hl); }
+  .hostrow[aria-selected="true"] { background: var(--hl); color: var(--hl-text); }
+  .hostrow[aria-selected="true"] .glyph, .hostrow[aria-selected="true"] .hostsub { color: inherit; }
+  .hostname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hostsub { grid-column: 2; font-size: 9pt; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hostsub.mono { font-size: 8.5pt; }
+  .sidebar-buttons { display: flex; padding: 4px; border-top: 1px solid var(--frame); }
+  @media (max-width: 700px) { .sidebar { width: 150px; } }
+
+  /* Inline form errors (next to the field they are about) */
+  .hint { margin-top: -4px; }
+  .field-error { color: var(--bad); margin-top: 2px; }
+  input.invalid { border-color: var(--bad); }
+  .form-title { font-weight: 600; margin: 0 0 12px; }
+  .buttons .left { margin-right: auto; }
+
+  /* Status bar */
+  .statusbar { display: flex; align-items: center; gap: 14px; padding: 3px 10px; border-top: 1px solid var(--frame); font-size: 9pt; color: var(--muted); white-space: nowrap; overflow: hidden; }
+  .statusbar .mono { font-size: 9pt; }
+
+  /* Dialog */
+  dialog { border: 1px solid var(--border); border-radius: 4px; background: var(--window); color: var(--text); padding: 0; width: min(440px, calc(100vw - 32px)); box-shadow: 0 8px 28px rgba(0,0,0,.35); }
+  dialog::backdrop { background: rgba(0,0,0,.3); }
+  .dlg-title { padding: 10px 14px; font-weight: 600; border-bottom: 1px solid var(--frame); }
+  .dlg-body { padding: 14px; }
+  .dlg-body ol { margin: 10px 0 0; padding-left: 20px; line-height: 1.6; }
+  .code { font: 600 22pt var(--mono); letter-spacing: .06em; }
+  .copyrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; }
+  .dlg-buttons { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--frame); }
+</style>
+</head>
+<body>
+  <div class="toolbar" role="toolbar" aria-label="Actions">
+    <button class="tb" id="btnConnect" title="Start or stop the tunnel">
+      <svg viewBox="0 0 16 16"><path d="M6 2v3M10 2v3M4.5 5h7v3a3.5 3.5 0 0 1-7 0zM8 11.5V14"/></svg><span>Connect</span>
+    </button>
+    <button class="tb" id="btnPair" title="Get a one-time pairing code for the browser extension">
+      <svg viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.6 2.6 0 0 1 3.7 3.7L10.7 8.2M9 11.5l-1.2 1.2a2.6 2.6 0 0 1-3.7-3.7L5.3 7.8"/></svg><span>Pair Browser…</span>
+    </button>
+    <div class="tb-sep"></div>
+    <button class="tb" id="btnSetup" title="Install the pinned browse, turn auto-update off, bind the relay to loopback, and verify">
+      <svg viewBox="0 0 16 16"><path d="M10.5 2.5a3 3 0 0 0-3.9 3.9L2.5 10.5l3 3 4.1-4.1a3 3 0 0 0 3.9-3.9l-1.8 1.8-1.7-.4-.4-1.7z"/></svg><span>Set Up Host</span>
+    </button>
+    <button class="tb" id="btnRelay" title="Start the relay on the remote host (agents normally start it themselves)">
+      <svg viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v2.8h-2.8"/></svg><span>Restart Relay</span>
+    </button>
+    <div class="spacer"></div>
+    <span class="pill" id="pill"><span class="glyph" id="pillGlyph">■</span><span id="pillLabel">…</span></span>
+  </div>
+
+  <div class="main">
+  <nav class="sidebar" aria-label="Hosts">
+    <div class="sidebar-title">Hosts</div>
+    <ul class="hostlist" id="hostList" role="listbox" aria-label="Hosts"></ul>
+    <div class="sidebar-buttons">
+      <button class="tb" id="btnAddHost" title="Add another remote host; it gets the next free local port pair">
+        <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg><span>Add Host…</span>
+      </button>
+    </div>
+  </nav>
+  <div class="content">
+  <div id="messages" aria-live="polite"></div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" data-tab="status" aria-selected="true" title="Ctrl+1">Status</button>
+    <button class="tab" role="tab" data-tab="traffic" aria-selected="false" title="Ctrl+2">Traffic</button>
+    <button class="tab" role="tab" data-tab="log" aria-selected="false" title="Ctrl+3">Log</button>
+    <button class="tab" role="tab" data-tab="settings" aria-selected="false" title="Ctrl+4">Settings</button>
+  </div>
+
+  <div class="pages">
+    <section class="page" id="statusPage" role="tabpanel">
+      <div class="heading"><span class="glyph" id="glyph">■</span><span id="label">…</span></div>
+      <div class="msg info" id="nextStep" hidden style="margin-bottom:12px"><p id="nextStepText"></p></div>
+      <div class="form selectable">
+        <span class="label">Host:</span><span class="value mono" id="host">—</span>
+        <span class="label">Tunnel:</span><span class="value" id="tunnel">—</span>
+        <span class="label">Relay:</span><span class="value" id="relay">—</span>
+        <span class="label">Browser:</span><span class="value" id="browser">—</span>
+        <span class="label">Agent tabs:</span><span class="value" id="tabs">—</span>
+        <span class="label">Auto-update:</span><span class="value" id="autoupdate">—</span>
+      </div>
+    </section>
+
+    <section class="page" id="trafficPage" role="tabpanel" hidden>
+      <div class="form">
+        <span class="label">Sent:</span><span class="value mono" id="up">—</span>
+        <span class="label">Received:</span><span class="value mono" id="down">—</span>
+        <span class="label">Rate:</span><span class="value mono" id="rate">—</span>
+        <span class="label">Connections:</span><span class="value" id="conns">—</span>
+      </div>
+      <div class="section">Browser actions</div>
+      <div class="form">
+        <span class="label">Commands:</span><span class="value" id="actSummary">—</span>
+        <span class="label">Most sent:</span><span class="value mono" id="actTop"></span>
+      </div>
+      <p class="muted" id="actNote" style="margin:4px 0 0"></p>
+      <div class="section">Rate, last 2 minutes</div>
+      <div class="frame"><canvas id="chart" class="chart"></canvas></div>
+      <div class="legend"><span><span class="sw up"></span>sent (browser → relay)</span><span><span class="sw down"></span>received (relay → browser)</span><span id="chartMax"></span></div>
+      <div class="section">Recent connections</div>
+      <div class="frame tablewrap">
+        <table>
+          <thead><tr><th>#</th><th>Opened</th><th class="num">Duration</th><th class="num">Sent</th><th class="num">Received</th><th>State</th></tr></thead>
+          <tbody id="connRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="page" id="logPage" role="tabpanel" hidden>
+      <div class="logbar">
+        <div class="seg" role="group" aria-label="Which log">
+          <button id="segHost" aria-pressed="true" title="This app's lines about the selected host">This host</button>
+          <button id="segAll" aria-pressed="false" title="Every line this app wrote, all hosts and app-wide">All hosts</button>
+          <button id="segRelay" aria-pressed="false" title="The selected host's remote relay log">Remote relay</button>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn" id="btnRefreshRelay" hidden>Refresh</button>
+        <button class="btn" id="btnOpenLog">Open Log File</button>
+      </div>
+      <pre class="log frame" id="log"></pre>
+    </section>
+
+    <section class="page" id="settingsPage" role="tabpanel" hidden>
+      <form id="settings" novalidate>
+        <div class="form-title" id="formTitle">Host</div>
+        <div class="msg bad" id="formError" hidden style="margin-bottom:10px"></div>
+        <div class="form" style="align-items:center">
+          <label class="label" for="fId" data-adding>Id:</label>
+          <input type="text" id="fId" name="hostId" placeholder="from the name or host" spellcheck="false" data-adding>
+          <span data-adding></span><div class="hint" data-adding><div class="muted">Tags this host's log lines: lower-case letters, digits, - and _</div><div class="field-error" id="errId" hidden></div></div>
+          <label class="label" for="fName">Name:</label>
+          <input type="text" id="fName" name="hostName" placeholder="optional, e.g. build box" spellcheck="false">
+          <label class="label" for="fHost">SSH host:</label>
+          <input type="text" id="fHost" name="host" placeholder="e.g. jon@dev004" spellcheck="false">
+          <span></span><div class="hint"><div class="muted">user@host, or an alias from ~/.ssh/config (without a LocalForward)</div><div class="field-error" id="errHost" hidden></div></div>
+          <label class="label" for="fAddr">Local address:</label>
+          <input type="text" id="fAddr" name="localAddress" spellcheck="false" placeholder="e.g. 127.0.0.2" style="width:140px">
+          <span></span><div class="hint"><div class="muted" id="addrHint">Each host has its own 127.0.0.x; the port is always the relay's own</div><div class="field-error" id="errLocalAddress" hidden></div></div>
+          <label class="label" for="fOpts">SSH options:</label>
+          <input type="text" id="fOpts" name="sshOptions" spellcheck="false" placeholder="e.g. IdentityFile=~/.ssh/id_dev">
+          <span></span><div class="hint"><div class="muted">Extra -o options, comma separated</div><div class="field-error" id="errSshOptions" hidden></div></div>
+          <span class="label">Startup:</span>
+          <span><label class="check"><input type="checkbox" name="autoConnect">Connect this host when the app starts</label></span>
+          <span></span>
+          <span><label class="check"><input type="checkbox" id="autostart">Start browse-bridge at login</label></span>
+          <span class="label">Traffic:</span>
+          <span><label class="check"><input type="checkbox" name="countActions">Count browser actions</label></span>
+          <span></span><div class="hint"><div class="muted">Reads only the names of the commands the relay sends (click, navigate, …), never their contents</div></div>
+        </div>
+        <div class="buttons">
+          <button type="button" class="btn left" id="btnRemoveHost" title="Disconnect this host and remove it from the list">Remove Host…</button>
+          <button type="button" class="btn" id="btnReset">Reset</button>
+          <button type="submit" class="btn default" id="btnApply" title="Ctrl+Enter">Apply</button>
+        </div>
+      </form>
+    </section>
+  </div>
+  </div>
+  </div>
+
+  <div class="statusbar">
+    <span><span class="glyph" id="sbGlyph">■</span> <span id="sbLabel">…</span></span>
+    <span class="mono" id="sbTraffic"></span>
+    <span class="spacer"></span>
+    <span id="sbChecked"></span>
+    <span class="mono selectable" id="sbVersion" title="Running version: package version + commits since it was set, then the commit"></span>
+  </div>
+
+  <dialog id="pairDialog">
+    <div class="dlg-title" id="pairTitle">Pair Browser</div>
+    <div class="dlg-body">
+      <div class="frame copyrow"><span class="code selectable" id="pairCode"></span><button class="btn" id="btnCopyCode">Copy</button></div>
+      <div class="frame copyrow" style="margin-top:6px"><span class="mono selectable" id="pairAddr"></span><button class="btn" id="btnCopyAddr">Copy</button></div>
+      <ol>
+        <li>In Edge or Chrome, open <b>Extensions → browse → Options</b>.</li>
+        <li>Expand <b>advanced</b> (or click <b>Pair with a code</b>).</li>
+        <li>Enter the code and the relay address above, then click <b>Connect</b>.</li>
+      </ol>
+      <p class="muted" style="margin:10px 0 0">Works once, until <span id="pairExpiry"></span>. This window closes when the browser connects.</p>
+      <p class="msg info" style="margin:10px 0 0" id="pairNote"></p>
+    </div>
+    <div class="dlg-buttons"><button class="btn default" id="btnPairClose">Close</button></div>
+  </dialog>
+
+  <dialog id="removeDialog">
+    <div class="dlg-title">Remove Host</div>
+    <div class="dlg-body"><p style="margin:0" id="removeText"></p></div>
+    <div class="dlg-buttons"><button class="btn" id="btnRemoveCancel">Cancel</button><button class="btn default" id="btnRemoveConfirm">Remove</button></div>
+  </dialog>
+
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>

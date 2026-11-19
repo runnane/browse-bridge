@@ -1,0 +1,9 @@
+node_modules/
+.claude/worktrees/
+*.pristine
+# The tracker token lives here (env.RESPAWN_MCP_TOKEN).
+# Must be covered by this file, not by a machine-wide ignore.
+.claude/settings.local.json
+# The MCP server config is local, not tracked: it names an internal system (BBR-23).
+# Must be covered by this file, not by a machine-wide ignore.
+.mcp.json

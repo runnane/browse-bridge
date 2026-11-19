@@ -1,0 +1,15 @@
+# Weekly version updates for the npm dependencies (BBR-26).
+# Dependabot's npm ecosystem reads pnpm-lock.yaml as well as package.json.
+# No github-actions entry: the repo has no workflows (ci: none).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      # Electron is a devDependency; without prefix-development its bumps
+      # would not carry the chore(deps) prefix this repo uses.
+      prefix: chore(deps)
+      prefix-development: chore(deps)

@@ -1,0 +1,5 @@
+# pnpm 11 reads its build-scripts allowlist only from here. pnpm 10 ignores this
+# key and skips Electron's postinstall; bin/browse-bridge then downloads the
+# binary on first launch, so both work.
+allowBuilds:
+  electron: true

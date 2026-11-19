@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Launch browse-bridge from a source checkout.
+#
+# Ubuntu 24.04+ restricts unprivileged user namespaces, so Chromium needs its
+# setuid helper (chrome-sandbox owned by root, mode 4755). Without it Electron
+# aborts at start. When the helper is not set up this falls back to
+# --no-sandbox: the window only ever loads this app's own local page under a
+# strict CSP, never remote content. To keep the sandbox instead, run once:
+#   sudo chown root:root <path printed below> && sudo chmod 4755 <same path>
+set -euo pipefail
+here="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+electron="$here/node_modules/.bin/electron"
+if [ ! -x "$electron" ]; then
+  echo "browse-bridge: run 'npm install' (or 'pnpm install') in $here first" >&2
+  exit 1
+fi
+pkg="$(readlink -f "$here/node_modules/electron")"
+if [ ! -x "$pkg/dist/electron" ]; then
+  # pnpm 10 skips Electron's postinstall unless allowlisted; fetch the binary here instead.
+  echo "browse-bridge: downloading the Electron binary (first run)" >&2
+  node "$pkg/install.js"
+fi
+sandbox="$pkg/dist/chrome-sandbox"
+flags=()
+if [ "$(stat -c '%u %a' "$sandbox" 2>/dev/null)" != "0 4755" ]; then
+  echo "browse-bridge: $sandbox is not root-owned 4755; starting with --no-sandbox" >&2
+  flags+=(--no-sandbox)
+fi
+exec "$electron" "$here" "${flags[@]}" "$@"

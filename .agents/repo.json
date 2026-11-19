@@ -1,0 +1,16 @@
+{
+  "repo": "runnane/browse-bridge",
+  "trackerKey": "BBR",
+  "trackerSlug": "browse-bridge",
+  "visibility": "public",
+  "gates": {
+    "all": "npm run gates"
+  },
+  "release": "none",
+  "ci": "none",
+  "liveBoundary": "shell",
+  "worktreeSafe": true,
+  "deepDives": ".agents/",
+  "gatesDoc": ".agents/gates.md",
+  "userspaceBundle": "github:runnane/agent-userspace"
+}
