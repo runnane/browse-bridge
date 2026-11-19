@@ -178,7 +178,11 @@
   .about-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
   .about-name { font-size: 14pt; font-weight: 600; }
   .dlg-buttons .left { margin-right: auto; }
-  @media (max-width: 760px) { .tb.compact span { display: none; } .tb.compact { padding: 0 7px; } }
+  /* Help and About are icon-only (title and aria-label name them), so they never push the toolbar past the window */
+  .tb.icon { padding: 0 7px; }
+  /* The state pill gives way first: a long host name or state ellipsises instead of clipping the buttons */
+  .pill { min-width: 0; flex: 0 1 auto; overflow: hidden; }
+  #pillLabel { overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
@@ -199,11 +203,11 @@
     <div class="spacer"></div>
     <span class="pill" id="pill"><span class="glyph" id="pillGlyph">■</span><span id="pillLabel">…</span></span>
     <div class="tb-sep"></div>
-    <button class="tb compact" id="btnHelp" title="Help (F1)" aria-label="Help">
-      <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.2 6.3a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4M8 11.6v.1"/></svg><span>Help</span>
+    <button class="tb icon" id="btnHelp" title="Help (F1)" aria-label="Help">
+      <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.2 6.3a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4M8 11.6v.1"/></svg>
     </button>
-    <button class="tb compact" id="btnAbout" title="About browse-bridge" aria-label="About browse-bridge">
-      <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v4M8 4.6v.1"/></svg><span>About</span>
+    <button class="tb icon" id="btnAbout" title="About browse-bridge" aria-label="About browse-bridge">
+      <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v4M8 4.6v.1"/></svg>
     </button>
   </div>
 
