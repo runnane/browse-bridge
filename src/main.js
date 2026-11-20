@@ -13,6 +13,16 @@ import { iconPng, trayIconPng } from './icons.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 
+// Chromium on a Wayland session logs ERROR lines at every start that mean nothing for one
+// small local window: Vulkan is not supported with ozone/wayland, and Plasma's
+// wp_color_manager_v1 cannot take the sRGB transfer function (BBR-34). Turn both off,
+// keeping any --disable-features the user passed.
+if (process.platform === 'linux') {
+  const off = ['Vulkan', 'WaylandWpColorManagerV1'];
+  const given = app.commandLine.getSwitchValue('disable-features');
+  app.commandLine.appendSwitch('disable-features', [given, ...off].filter(Boolean).join(','));
+}
+
 // Two copies would fight over the proxy port; the second one just shows the first's window.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
