@@ -83,10 +83,15 @@ the link (which browse itself does not encrypt) rides inside SSH.
   names each host and its state in words (`dev004: Connected · dev005: Tunnel
   down`). Each host has a submenu with its own controls (Connect/Disconnect,
   Pair browser…, Start relay, Set up remote host, Show logs); Show window, Open
-  log file, Start at login and Quit stay top level. Every control is in the
+  log file, Start at login, Help, About browse-bridge… and Quit stay top level. Every control is in the
   menu (Linux tray clicks are unreliable). Desktop notification, naming the
   host, when a host connects or disconnects. Optional start at login (XDG
   autostart, which Plasma reads).
+
+- **Help and About:** **Help** (toolbar, tray, or <kbd>F1</kbd>) explains first
+  run, several hosts, every state and the shortcuts. **About** shows the running
+  version, the licence and a link to this repository, which opens in your
+  default browser.
 
 ## Install (on the machine with the browser)
 

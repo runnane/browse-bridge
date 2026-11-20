@@ -46,7 +46,11 @@ signal that pid. Never kill by name. A leaked ssh ControlMaster shows up as
   the second host and writes `<prefix>-host2.png`, `<prefix>-host2-log.png`
   and `second` (that render's text) in the JSON. `BB_SMOKE_INVALID=1` submits
   an Add Host form whose id clashes with the first host's and records the
-  inline error under `invalid`; the config refuses it before writing.
+  inline error under `invalid`; the config refuses it before writing. Last,
+  it opens the Help and About dialogs, writes `<prefix>-help.png` and
+  `<prefix>-about.png`, and records each dialog's text under `dialogs` (a
+  closed `<dialog>` is not in `text`, so check `dialogs`, and that `about`
+  shows a version).
 - **Render with a throwaway config**, never your own: write
   `<tmp>/xdg/browse-bridge/config.json` (hosts with `autoConnect: false` and
   `.invalid` ssh hosts) and run with `XDG_CONFIG_HOME=<tmp>/xdg HOME=<tmp>/home`.
@@ -64,6 +68,16 @@ signal that pid. Never kill by name. A leaked ssh ControlMaster shows up as
   the orchestrator against a `git worktree add --detach` of `origin/main` with
   `node_modules` symlinked from the primary checkout. Never drop the
   `XDG_CONFIG_HOME`/`HOME` override to get past the guard.
+- **A throwaway `HOME` alone is the same isolation, and the guard allows it.**
+  Measured 2026-11-19 (BBR-32): with `XDG_CONFIG_HOME` **unset** in the
+  session (check: `echo "${XDG_CONFIG_HOME-unset}"`), Electron puts the config
+  under `$HOME/.config`. So write `<tmp>/home/.config/browse-bridge/config.json`
+  and run with only `HOME=<tmp>/home`, from inside the isolated worktree
+  (`node_modules` symlinked in, and removed before committing: the
+  `node_modules/` ignore rule matches a directory, not a symlink). It is valid
+  only when the app log's `started; config <path>` line names that file, so
+  read that line every time. If `XDG_CONFIG_HOME` is set, this route is
+  closed.
 - **The real dev004 tunnel and real Edge pairing.** Neither is reachable from
   the dev box. The owner verifies those.
 

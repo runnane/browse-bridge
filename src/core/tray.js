@@ -56,6 +56,10 @@ export function trayMenuModel(agg, { autostart = false, version = '' } = {}) {
     { label: 'Open log file', action: 'openLogFile' },
     { label: 'Start at login', type: 'checkbox', checked: Boolean(autostart), action: 'autostart' },
     { type: 'separator' },
+    // Both open a dialog in the window (BBR-32).
+    { label: 'Help', action: 'showHelp' },
+    { label: 'About browse-bridge…', action: 'showAbout' },
+    { type: 'separator' },
     ...(version ? [{ label: version, enabled: false }] : []),
     { label: 'Quit', action: 'quit' },
   ];
