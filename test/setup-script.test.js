@@ -134,7 +134,7 @@ chmod 755 "$HOME/.local/bin/browse"
  * One whole SETUP_SCRIPT run, as exec.js runs it (`bash -s -- <browse> <pin>`
  * with the script on stdin), in a throwaway HOME.
  */
-function runSetup({ os = 'Linux', arch = 'x86_64', libc = 'glibc', omit = [], npm = false, pin = PIN, browsePath = '$HOME/.local/bin/browse', meta, preinstall } = {}) {
+function runSetup({ os = 'Linux', arch = 'x86_64', libc = 'glibc', omit = [], npm = false, pin = PIN, browsePath = '$HOME/.local/bin/browse', meta, preinstall, curlExit } = {}) {
   const root = tmpRoot('bb-setup-');
   const home = join(root, 'home');
   const tmp = join(root, 'tmp');
@@ -146,6 +146,8 @@ function runSetup({ os = 'Linux', arch = 'x86_64', libc = 'glibc', omit = [], np
   const metaFile = join(root, 'meta.json');
   writeFileSync(metaFile, metaJson(target, { integrity: pkg.integrity, tarball: tgzUrl(target), ...meta }));
   const log = fakeCurl(bin, root, { [metaUrl(target)]: metaFile, [tgzUrl(target)]: pkg.tgz });
+  // A host that cannot reach the registry at all: curl fails (6 = DNS, 28 = timeout) and prints no status.
+  if (curlExit) exe(join(bin, 'curl'), `#!/bin/sh\necho "$*" >> '${log}'\necho "curl: (${curlExit}) could not reach the host" >&2\nexit ${curlExit}\n`);
   const sentinel = npm ? fakeNpm(bin, root, pkg.browse) : join(root, 'npm-called');
   if (preinstall) preinstall(home);
   const r = spawnSync(BASH, ['-s', '--', browsePath, pin], {
@@ -316,6 +318,20 @@ test('setup script: a version the registry does not have exits 4 with the HTTP s
   assert.match(r.lastLine, /registry answered HTTP 404 for @opencode\/browse-linux-x64@0\.1\.99/);
   assert.equal(existsSync(r.installed), false);
 });
+
+for (const curlExit of [6, 28]) {
+  test(`setup script: a registry curl cannot reach (exit ${curlExit}, no status) says so, exits 4 and installs nothing`, () => {
+    const r = runSetup({ npm: true, curlExit });
+    assert.equal(r.status, 4, r.stdout + r.stderr);
+    assert.equal(r.parsed.steps.install, 'fail');
+    assert.equal(r.lastLine, `could not reach registry.npmjs.org from this host (curl exit ${curlExit}); check its DNS and outbound HTTPS`);
+    assert.doesNotMatch(r.stdout, /HTTP 000/);
+    assert.equal(r.requests.length, 1, 'only the metadata fetch was tried');
+    assert.equal(existsSync(r.installed), false);
+    assert.equal(existsSync(`${r.installed}.new`), false);
+    assert.equal(r.npmCalled, null);
+  });
+}
 
 test('setup script: a missing tool exits 3 and is named', () => {
   const r = runSetup({ omit: ['od'] });
