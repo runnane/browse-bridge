@@ -12,9 +12,10 @@ export const TARBALL_PREFIX = 'https://registry.npmjs.org/@opencode/';
 /**
  * POSIX sh functions behind the native install (BBR-54). `SETUP_SCRIPT`
  * interpolates this exact text, and the tests source it, so both run the same
- * code. Written for dash as well as bash, and safe under `set -uo pipefail`:
- * no pipeline whose left side may legitimately exit non-zero is tested for
- * its status. (This is a String.raw template: a dollar-brace in here is JS
+ * code. POSIX sh, run under dash and bash with `set -u` (and parsed by busybox
+ * ash, whose applets defeat the tests' fake PATH). No
+ * pipeline's status is tested, so nothing relies on bash's `pipefail`.
+ * (This is a String.raw template: a dollar-brace in here is JS
  * interpolation, so shell variables are written without braces.)
  *
  *   bb_target [alpine-release-file]  linux-x64|linux-arm64[-musl]; 1 = not Linux, 2 = Linux on an arch with no native package
@@ -81,9 +82,16 @@ bb_json_str() {
 `;
 
 /**
- * Idempotent remote setup, run with `bash -s -- <browsePath> <version>`.
+ * Idempotent remote setup, run with `sh -s -- <browsePath> <version>`.
  * Prints marker-delimited sections so the result can be checked at the
  * receiver rather than trusted from an exit code.
+ *
+ * POSIX sh (BBR-57): a stock Alpine or busybox host has /bin/sh but no bash.
+ * So no `pipefail`, no `${var:n}` substring, no `[[ ]]`, and text that did not
+ * come from this script (paths, versions, registry answers) is printed with
+ * `printf '%s\n'`, because dash's and ash's `echo` interpret backslashes.
+ * dash runs an EXIT trap on `exit` but not when a signal kills the script, so
+ * HUP/INT/TERM (a timed-out setup, a dropped ssh) exit through it explicitly.
  *
  * Install (BBR-54): on Linux x64/arm64 (glibc or musl) the platform package's
  * tarball is fetched from the npm registry with curl, its SHA-512 checked
@@ -100,11 +108,11 @@ bb_json_str() {
  * downloads take at most about 4 minutes (3 x 20 s + 3 x 60 s), inside the
  * controller's 300 s setup timeout.
  */
-export const SETUP_SCRIPT = String.raw`set -uo pipefail
+export const SETUP_SCRIPT = String.raw`set -u
 BROWSE="$1"; PIN="$2"; MARK='${MARK}'
-case "$BROWSE" in '$HOME/'*) BROWSE="$HOME/${'$'}{BROWSE#\$HOME/}";; '~/'*) BROWSE="$HOME/${'$'}{BROWSE:2}";; esac
+case "$BROWSE" in '$HOME/'*) BROWSE="$HOME/${'$'}{BROWSE#\$HOME/}";; '~/'*) BROWSE="$HOME/${'$'}{BROWSE#\~/}";; esac
 step() { echo "$MARK step $1 $2"; }
-fail() { step install fail; echo "$1"; exit "$2"; }
+fail() { step install fail; printf '%s\n' "$1"; exit "$2"; }
 ${INSTALL_FUNCS}
 have=""
 [ -x "$BROWSE" ] && have="$("$BROWSE" version 2>/dev/null </dev/null || true)"
@@ -118,6 +126,7 @@ if [ "$have" != "$PIN" ]; then
     missing=$(bb_need_tools) || fail "cannot install browse $PIN: missing$missing" 3
     tmp=$(mktemp -d) || fail "mktemp -d failed" 4
     trap 'rm -rf "$tmp"' EXIT
+    trap 'exit 1' HUP INT TERM
     pkg="@opencode/browse-$target"
     code=$(curl -sS --connect-timeout 15 --max-time 20 --retry 2 -o "$tmp/meta.json" -w '%{http_code}' "https://registry.npmjs.org/@opencode%2fbrowse-$target/$PIN" </dev/null); crc=$?
     case "$code" in
@@ -153,7 +162,7 @@ fi
 "$BROWSE" update --mode off >&2 && step autoupdate ok || step autoupdate fail
 "$BROWSE" set hostname 127.0.0.1 >&2 && step hostname ok || step hostname fail
 "$BROWSE" restart >&2 && step restart ok || step restart fail
-echo "$MARK version $("$BROWSE" version 2>/dev/null)"
+printf '%s\n' "$MARK version $("$BROWSE" version 2>/dev/null)"
 echo "$MARK listen-begin"
 (ss -ltnH 2>/dev/null || netstat -ltn 2>/dev/null) | awk '{for(i=1;i<=NF;i++) if ($i ~ /:[0-9]+$/) {print $i; break}}'
 echo "$MARK listen-end"

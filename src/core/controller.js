@@ -507,10 +507,14 @@ export class Controller extends EventEmitter {
 
   /** Last lines of the remote relay log. */
   async relayLog(lines = 200) {
-    const body = `f="\${XDG_STATE_HOME:-$HOME/.local/state}/browse/logs/relay.log"; [ -f "$f" ] && tail -n ${Number(lines) | 0} "$f" || echo "(no relay log at $f)"`;
-    const res = await this.transport().script(body, [], { controlDir: this.controlDir, timeoutMs: 20_000 });
+    const res = await this.transport().script(relayLogScript(lines), [], { controlDir: this.controlDir, timeoutMs: 20_000 });
     return res.code === 0 ? res.stdout : `could not read relay log: ${res.stderr.trim()}`;
   }
+}
+
+/** The script() body behind relayLog: the last `lines` lines of the remote relay log. POSIX sh (BBR-57). */
+export function relayLogScript(lines = 200) {
+  return `f="\${XDG_STATE_HOME:-$HOME/.local/state}/browse/logs/relay.log"; [ -f "$f" ] && tail -n ${Number(lines) | 0} "$f" || printf '%s\\n' "(no relay log at $f)"`;
 }
 
 /** The proxy's action counts as plain data for the window (its counters use null-prototype objects). */

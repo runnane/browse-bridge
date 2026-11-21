@@ -13,6 +13,8 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { INSTALL_FUNCS, SETUP_SCRIPT, parseSetupOutput, verifySetup } from '../src/core/browse.js';
+import { relayLogScript } from '../src/core/controller.js';
+import { SCRIPT_SHELL } from '../src/core/exec.js';
 
 // Every temp root this file makes, removed once all its tests have run (BBR-61).
 // runSetup returns paths inside its root that the assertions read, so removal
@@ -37,6 +39,17 @@ function real(tool) {
 }
 const BASH = real('bash');
 const SH = '/bin/sh';
+// BBR-57: exec.js runs every script() body under `sh`, and a busybox-only host
+// has no bash, so the whole script runs under /bin/sh (dash here) as well as bash.
+// (busybox ash cannot run these: it finds its own applets for uname, od, tar...
+// whatever PATH says, so the fakes and the "missing tool" cases would not hold.
+// test/setup-tilde.test.js and the parse check below run it.)
+const SHELLS = [SH, BASH];
+const BUSYBOX = ['/usr/bin/busybox', '/bin/busybox'].find((p) => existsSync(p)) ?? null;
+test('setup script: /bin/sh is not bash, so the sh runs below are not bash in disguise', () => {
+  const r = spawnSync(SH, ['-c', 'echo "${BASH_VERSION:-none}"'], { encoding: 'utf8' });
+  assert.equal(r.stdout.trim(), 'none', `${SH} is bash here; the POSIX runs would prove nothing`);
+});
 
 /** Everything SETUP_SCRIPT and the fakes call, minus what a case leaves out. */
 const TOOLS = ['mktemp', 'rm', 'mv', 'chmod', 'mkdir', 'cp', 'cut', 'tr', 'wc', 'od', 'base64', 'sha512sum', 'grep', 'sed', 'tar', 'gzip', 'awk'];
@@ -131,10 +144,10 @@ chmod 755 "$HOME/.local/bin/browse"
 }
 
 /**
- * One whole SETUP_SCRIPT run, as exec.js runs it (`bash -s -- <browse> <pin>`
- * with the script on stdin), in a throwaway HOME.
+ * One whole SETUP_SCRIPT run, as exec.js runs it (`sh -s -- <browse> <pin>`
+ * with the script on stdin), in a throwaway HOME, under `shell`.
  */
-function runSetup({ os = 'Linux', arch = 'x86_64', libc = 'glibc', omit = [], npm = false, pin = PIN, browsePath = '$HOME/.local/bin/browse', meta, preinstall, curlExit } = {}) {
+function runSetupIn({ shell, os = 'Linux', arch = 'x86_64', libc = 'glibc', omit = [], npm = false, pin = PIN, browsePath = '$HOME/.local/bin/browse', meta, preinstall, curlExit } = {}) {
   const root = tmpRoot('bb-setup-');
   const home = join(root, 'home');
   const tmp = join(root, 'tmp');
@@ -150,7 +163,8 @@ function runSetup({ os = 'Linux', arch = 'x86_64', libc = 'glibc', omit = [], np
   if (curlExit) exe(join(bin, 'curl'), `#!/bin/sh\necho "$*" >> '${log}'\necho "curl: (${curlExit}) could not reach the host" >&2\nexit ${curlExit}\n`);
   const sentinel = npm ? fakeNpm(bin, root, pkg.browse) : join(root, 'npm-called');
   if (preinstall) preinstall(home);
-  const r = spawnSync(BASH, ['-s', '--', browsePath, pin], {
+  assert.ok(SHELLS.includes(shell), `runSetup needs a shell, got ${shell}`);
+  const r = spawnSync(shell, ['-s', '--', browsePath, pin], {
     input: SETUP_SCRIPT,
     env: { HOME: home, PATH: bin, TMPDIR: tmp },
     encoding: 'utf8',
@@ -167,24 +181,53 @@ function runSetup({ os = 'Linux', arch = 'x86_64', libc = 'glibc', omit = [], np
 }
 
 /**
- * Run one INSTALL_FUNCS function under a given shell, PATH = a private bin.
- * Under bash it runs with SETUP_SCRIPT's own `set -uo pipefail`.
+ * Run one INSTALL_FUNCS function under a given shell, PATH = a private bin,
+ * with SETUP_SCRIPT's own `set -u`.
  */
 function piece(shell, bin, call, args = []) {
-  const prelude = shell === BASH ? 'set -uo pipefail\n' : '';
-  const r = spawnSync(shell, ['-c', `${prelude}${INSTALL_FUNCS}\n${call} "$@"`, 'sh', ...args], {
+  const r = spawnSync(shell, ['-c', `set -u\n${INSTALL_FUNCS}\n${call} "$@"`, 'sh', ...args], {
     env: { PATH: bin },
     encoding: 'utf8',
   });
   return { status: r.status, out: r.stdout.trim(), err: r.stderr };
 }
 
-test('setup script: SETUP_SCRIPT parses under bash, and INSTALL_FUNCS under sh (dash) and bash', () => {
-  assert.equal(spawnSync(BASH, ['-n'], { input: SETUP_SCRIPT }).status, 0);
-  for (const shell of [SH, BASH]) assert.equal(spawnSync(shell, ['-n'], { input: INSTALL_FUNCS }).status, 0, shell);
+// Every script() body parses as POSIX sh. A parse check only: dash accepts a
+// bash substring like `${x:2}` at parse time and fails when it runs, which the
+// whole-script runs below and test/setup-tilde.test.js catch.
+const PARSERS = [[SH], [BASH], ...(BUSYBOX ? [[BUSYBOX, 'sh']] : [])];
+const BODIES = { SETUP_SCRIPT, INSTALL_FUNCS, relayLogScript: relayLogScript(200) };
+test(`setup script: every script() body parses under ${PARSERS.map((p) => p.join(' ')).join(', ')}`, () => {
+  for (const [cmd, ...pre] of PARSERS) {
+    for (const [name, body] of Object.entries(BODIES)) {
+      const r = spawnSync(cmd, [...pre, '-n'], { input: body, encoding: 'utf8' });
+      assert.equal(r.status, 0, `${name} under ${cmd} ${pre.join(' ')}: ${r.stderr}`);
+    }
+  }
+  // Negative control: bash-only syntax (process substitution) that bash -n
+  // accepts is refused by sh -n, so the check above can tell the two apart.
+  const bashOnly = 'cat <(echo x)\n';
+  assert.equal(spawnSync(BASH, ['-n'], { input: bashOnly }).status, 0);
+  assert.notEqual(spawnSync(SH, ['-n'], { input: bashOnly }).status, 0);
 });
 
-for (const shell of [SH, BASH]) {
+test('setup script: exec.js runs script() bodies under sh, never bash', () => {
+  assert.equal(SCRIPT_SHELL, 'sh');
+  assert.doesNotMatch(SETUP_SCRIPT, /pipefail|\$\{[A-Za-z_]+:[0-9]/, 'no bash-only prelude or substring');
+});
+
+test('setup script: the relay-log body runs under sh (dash): the log tail, or a plain "no relay log" line', () => {
+  const home = tmpRoot('bb-relaylog-');
+  const env = { HOME: home, PATH: '/usr/bin:/bin' };
+  const none = spawnSync(SH, ['-s', '--'], { input: relayLogScript(5), env, encoding: 'utf8' });
+  assert.deepEqual([none.status, none.stdout], [0, `(no relay log at ${home}/.local/state/browse/logs/relay.log)\n`]);
+  mkdirSync(join(home, '.local', 'state', 'browse', 'logs'), { recursive: true });
+  writeFileSync(join(home, '.local', 'state', 'browse', 'logs', 'relay.log'), 'a\nb\nc\n');
+  const tail = spawnSync(SH, ['-s', '--'], { input: relayLogScript(2), env, encoding: 'utf8' });
+  assert.deepEqual([tail.status, tail.stdout], [0, 'b\nc\n']);
+});
+
+for (const shell of SHELLS) {
   test(`setup pieces (${shell}): target from uname and ldd; no baseline, musl from ldd or alpine-release`, () => {
     const root = tmpRoot('bb-piece-');
     const cases = [
@@ -272,122 +315,134 @@ for (const shell of [SH, BASH]) {
   });
 }
 
-test('setup script: native install fetches the pinned tarball, checks its SHA-512 and installs package/bin/browse', () => {
-  const r = runSetup({ npm: true });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.deepEqual(r.requests, [metaUrl('linux-x64'), tgzUrl('linux-x64')]);
-  assert.equal(r.parsed.steps.install, 'ok');
-  assert.equal(r.parsed.installVia, 'native');
-  assert.equal(r.parsed.installSha512, r.pkg.hex, 'the marker carries the hash computed from the local tarball');
-  assert.deepEqual(verifySetup(r.parsed, { version: PIN }), []);
-  assert.equal(readFileSync(r.installed, 'utf8'), r.pkg.browse);
-  assert.equal(statSync(r.installed).mode & 0o777, 0o755);
-  assert.equal(existsSync(`${r.installed}.new`), false);
-  assert.equal(r.npmCalled, null, 'npm present but not used on Linux');
-  assert.deepEqual(readdirSync(r.tmp), [], 'the temp dir is removed by the trap');
-});
+// Every whole-script case runs once per shell in SHELLS (BBR-57).
+for (const shell of SHELLS) {
+  const runSetup = (opts = {}) => runSetupIn({ shell, ...opts });
 
-test('setup script: a tarball whose SHA-512 differs from dist.integrity installs nothing, exits 4, never falls through to npm', () => {
-  // One nibble flipped in the served integrity: still a well-formed sha512, so it fails at the comparison.
-  const probe = runSetup();
-  const flipped = probe.pkg.hex.replace(/^./, (c) => (c === '0' ? '1' : '0'));
-  const integrity = `sha512-${Buffer.from(flipped, 'hex').toString('base64')}`;
-  const r = runSetup({ npm: true, meta: { integrity } });
-  assert.equal(r.status, 4, r.stdout + r.stderr);
-  assert.equal(r.parsed.steps.install, 'fail');
-  assert.match(r.lastLine, new RegExp(`checksum mismatch .*expected sha512 ${flipped}, got ${r.pkg.hex}`));
-  assert.equal(existsSync(r.installed), false);
-  assert.equal(existsSync(`${r.installed}.new`), false);
-  assert.equal(r.npmCalled, null, 'a native failure never falls through to npm');
-  assert.equal(r.parsed.installSha512, null);
-  assert.match(verifySetup(r.parsed, { version: PIN }).join('\n'), /step install: fail/);
-});
+  test(`setup script (${shell}): native install fetches the pinned tarball, checks its SHA-512 and installs package/bin/browse`, () => {
+    const r = runSetup({ npm: true });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(r.requests, [metaUrl('linux-x64'), tgzUrl('linux-x64')]);
+    assert.equal(r.parsed.steps.install, 'ok');
+    assert.equal(r.parsed.installVia, 'native');
+    assert.equal(r.parsed.installSha512, r.pkg.hex, 'the marker carries the hash computed from the local tarball');
+    assert.deepEqual(verifySetup(r.parsed, { version: PIN }), []);
+    assert.equal(readFileSync(r.installed, 'utf8'), r.pkg.browse);
+    assert.equal(statSync(r.installed).mode & 0o777, 0o755);
+    assert.equal(existsSync(`${r.installed}.new`), false);
+    assert.equal(r.npmCalled, null, 'npm present but not used on Linux');
+    assert.deepEqual(readdirSync(r.tmp), [], 'the temp dir is removed by the trap');
+  });
 
-test('setup script: a tarball URL outside registry.npmjs.org/@opencode/ is refused before it is fetched', () => {
-  const evil = 'https://evil.example/@opencode/browse-linux-x64/-/browse-linux-x64-0.1.4.tgz';
-  const r = runSetup({ npm: true, meta: { tarball: evil } });
-  assert.equal(r.status, 4, r.stdout + r.stderr);
-  assert.match(r.lastLine, /refusing tarball URL outside https:\/\/registry\.npmjs\.org\/@opencode\/: https:\/\/evil\.example/);
-  assert.deepEqual(r.requests, [metaUrl('linux-x64')], 'the tarball was never requested');
-  assert.equal(r.npmCalled, null);
-});
-
-test('setup script: a version the registry does not have exits 4 with the HTTP status', () => {
-  const r = runSetup({ pin: '0.1.99' });
-  assert.equal(r.status, 4, r.stdout + r.stderr);
-  assert.match(r.lastLine, /registry answered HTTP 404 for @opencode\/browse-linux-x64@0\.1\.99/);
-  assert.equal(existsSync(r.installed), false);
-});
-
-for (const curlExit of [6, 28]) {
-  test(`setup script: a registry curl cannot reach (exit ${curlExit}, no status) says so, exits 4 and installs nothing`, () => {
-    const r = runSetup({ npm: true, curlExit });
+  test(`setup script (${shell}): a tarball whose SHA-512 differs from dist.integrity installs nothing, exits 4, never falls through to npm`, () => {
+    // One nibble flipped in the served integrity: still a well-formed sha512, so it fails at the comparison.
+    const probe = runSetup();
+    const flipped = probe.pkg.hex.replace(/^./, (c) => (c === '0' ? '1' : '0'));
+    const integrity = `sha512-${Buffer.from(flipped, 'hex').toString('base64')}`;
+    const r = runSetup({ npm: true, meta: { integrity } });
     assert.equal(r.status, 4, r.stdout + r.stderr);
     assert.equal(r.parsed.steps.install, 'fail');
-    assert.equal(r.lastLine, `could not reach registry.npmjs.org from this host (curl exit ${curlExit}); check its DNS and outbound HTTPS`);
-    assert.doesNotMatch(r.stdout, /HTTP 000/);
-    assert.equal(r.requests.length, 1, 'only the metadata fetch was tried');
+    assert.match(r.lastLine, new RegExp(`checksum mismatch .*expected sha512 ${flipped}, got ${r.pkg.hex}`));
     assert.equal(existsSync(r.installed), false);
     assert.equal(existsSync(`${r.installed}.new`), false);
+    assert.equal(r.npmCalled, null, 'a native failure never falls through to npm');
+    assert.equal(r.parsed.installSha512, null);
+    assert.match(verifySetup(r.parsed, { version: PIN }).join('\n'), /step install: fail/);
+  });
+
+  test(`setup script (${shell}): a tarball URL outside registry.npmjs.org/@opencode/ is refused before it is fetched`, () => {
+    const evil = 'https://evil.example/@opencode/browse-linux-x64/-/browse-linux-x64-0.1.4.tgz';
+    const r = runSetup({ npm: true, meta: { tarball: evil } });
+    assert.equal(r.status, 4, r.stdout + r.stderr);
+    assert.match(r.lastLine, /refusing tarball URL outside https:\/\/registry\.npmjs\.org\/@opencode\/: https:\/\/evil\.example/);
+    assert.deepEqual(r.requests, [metaUrl('linux-x64')], 'the tarball was never requested');
     assert.equal(r.npmCalled, null);
   });
+
+  test(`setup script (${shell}): a version the registry does not have exits 4 with the HTTP status`, () => {
+    const r = runSetup({ pin: '0.1.99' });
+    assert.equal(r.status, 4, r.stdout + r.stderr);
+    assert.match(r.lastLine, /registry answered HTTP 404 for @opencode\/browse-linux-x64@0\.1\.99/);
+    assert.equal(existsSync(r.installed), false);
+  });
+
+  for (const curlExit of [6, 28]) {
+    test(`setup script (${shell}): a registry curl cannot reach (exit ${curlExit}, no status) says so, exits 4 and installs nothing`, () => {
+      const r = runSetup({ npm: true, curlExit });
+      assert.equal(r.status, 4, r.stdout + r.stderr);
+      assert.equal(r.parsed.steps.install, 'fail');
+      assert.equal(r.lastLine, `could not reach registry.npmjs.org from this host (curl exit ${curlExit}); check its DNS and outbound HTTPS`);
+      assert.doesNotMatch(r.stdout, /HTTP 000/);
+      assert.equal(r.requests.length, 1, 'only the metadata fetch was tried');
+      assert.equal(existsSync(r.installed), false);
+      assert.equal(existsSync(`${r.installed}.new`), false);
+      assert.equal(r.npmCalled, null);
+    });
+  }
+
+  test(`setup script (${shell}): a missing tool exits 3 and is named`, () => {
+    const r = runSetup({ omit: ['od'] });
+    assert.equal(r.status, 3, r.stdout + r.stderr);
+    assert.equal(r.parsed.steps.install, 'fail');
+    assert.match(r.lastLine, /cannot install browse 0\.1\.4: missing od$/);
+    assert.deepEqual(r.requests, []);
+  });
+
+  test(`setup script (${shell}): npm only on a non-Linux remote; without npm there, and on an unsupported Linux arch, exit 6`, () => {
+    const mac = runSetup({ os: 'Darwin', arch: 'arm64', npm: true });
+    assert.equal(mac.status, 0, mac.stdout + mac.stderr);
+    assert.equal(mac.npmCalled, `i -g --prefix ${mac.home}/.local @opencode/browse@${PIN}`);
+    assert.equal(mac.parsed.installVia, 'npm');
+    assert.deepEqual(verifySetup(mac.parsed, { version: PIN }), [], 'npm checks the registry integrity itself');
+    assert.deepEqual(mac.requests, []);
+
+    const macNoNpm = runSetup({ os: 'Darwin', arch: 'arm64' });
+    assert.equal(macNoNpm.status, 6);
+    assert.equal(macNoNpm.lastLine, 'unsupported platform Darwin/arm64; install browse yourself and set remoteBrowse');
+
+    const arm32 = runSetup({ arch: 'armv7l', npm: true });
+    assert.equal(arm32.status, 6);
+    assert.equal(arm32.npmCalled, null, 'Linux never uses npm: its launcher would need Node 22');
+    assert.match(arm32.lastLine, /^unsupported platform Linux\/armv7l;/);
+  });
+
+  test(`setup script (${shell}): the install renames over an old npm launcher symlink; at the pin it skips; outside ~/.local it exits 5`, () => {
+    let launcher;
+    const r = runSetup({
+      preinstall(home) {
+        const lib = join(home, '.local', 'lib', 'node_modules', '@opencode', 'browse', 'dist');
+        mkdirSync(lib, { recursive: true });
+        mkdirSync(join(home, '.local', 'bin'), { recursive: true });
+        launcher = join(lib, 'cli.mjs');
+        exe(launcher, fakeBrowse('0.1.3'));
+        symlinkSync('../lib/node_modules/@opencode/browse/dist/cli.mjs', join(home, '.local', 'bin', 'browse'));
+      },
+    });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(r.parsed.steps.install, 'ok');
+    assert.equal(lstatSync(r.installed).isFile(), true, 'a regular file now, not the symlink');
+    assert.equal(readFileSync(launcher, 'utf8'), fakeBrowse('0.1.3'), 'the launcher it pointed at is left alone');
+
+    const skip = runSetup({
+      preinstall(home) {
+        mkdirSync(join(home, '.local', 'bin'), { recursive: true });
+        exe(join(home, '.local', 'bin', 'browse'), fakeBrowse(PIN));
+      },
+    });
+    assert.equal(skip.status, 0);
+    assert.equal(skip.parsed.steps.install, 'skip');
+    assert.deepEqual(skip.requests, []);
+    assert.deepEqual(verifySetup(skip.parsed, { version: PIN }), []);
+
+    const elsewhere = runSetup({ browsePath: '/opt/browse/bin/browse' });
+    assert.equal(elsewhere.status, 5);
+    assert.deepEqual(elsewhere.requests, []);
+  });
+
+  test(`setup script (${shell}): text from outside the script is printed as-is, backslashes and all`, () => {
+    // dash's echo turns "\n" into a newline; the failure and version lines use printf '%s\n'.
+    const r = runSetup({ browsePath: String.raw`/opt/a\nb\cbrowse` });
+    assert.equal(r.status, 5);
+    assert.equal(r.lastLine, String.raw`browse  at /opt/a\nb\cbrowse is not 0.1.4 and is not the ~/.local install this app manages`);
+  });
 }
-
-test('setup script: a missing tool exits 3 and is named', () => {
-  const r = runSetup({ omit: ['od'] });
-  assert.equal(r.status, 3, r.stdout + r.stderr);
-  assert.equal(r.parsed.steps.install, 'fail');
-  assert.match(r.lastLine, /cannot install browse 0\.1\.4: missing od$/);
-  assert.deepEqual(r.requests, []);
-});
-
-test('setup script: npm only on a non-Linux remote; without npm there, and on an unsupported Linux arch, exit 6', () => {
-  const mac = runSetup({ os: 'Darwin', arch: 'arm64', npm: true });
-  assert.equal(mac.status, 0, mac.stdout + mac.stderr);
-  assert.equal(mac.npmCalled, `i -g --prefix ${mac.home}/.local @opencode/browse@${PIN}`);
-  assert.equal(mac.parsed.installVia, 'npm');
-  assert.deepEqual(verifySetup(mac.parsed, { version: PIN }), [], 'npm checks the registry integrity itself');
-  assert.deepEqual(mac.requests, []);
-
-  const macNoNpm = runSetup({ os: 'Darwin', arch: 'arm64' });
-  assert.equal(macNoNpm.status, 6);
-  assert.equal(macNoNpm.lastLine, 'unsupported platform Darwin/arm64; install browse yourself and set remoteBrowse');
-
-  const arm32 = runSetup({ arch: 'armv7l', npm: true });
-  assert.equal(arm32.status, 6);
-  assert.equal(arm32.npmCalled, null, 'Linux never uses npm: its launcher would need Node 22');
-  assert.match(arm32.lastLine, /^unsupported platform Linux\/armv7l;/);
-});
-
-test('setup script: the install renames over an old npm launcher symlink; at the pin it skips; outside ~/.local it exits 5', () => {
-  let launcher;
-  const r = runSetup({
-    preinstall(home) {
-      const lib = join(home, '.local', 'lib', 'node_modules', '@opencode', 'browse', 'dist');
-      mkdirSync(lib, { recursive: true });
-      mkdirSync(join(home, '.local', 'bin'), { recursive: true });
-      launcher = join(lib, 'cli.mjs');
-      exe(launcher, fakeBrowse('0.1.3'));
-      symlinkSync('../lib/node_modules/@opencode/browse/dist/cli.mjs', join(home, '.local', 'bin', 'browse'));
-    },
-  });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(r.parsed.steps.install, 'ok');
-  assert.equal(lstatSync(r.installed).isFile(), true, 'a regular file now, not the symlink');
-  assert.equal(readFileSync(launcher, 'utf8'), fakeBrowse('0.1.3'), 'the launcher it pointed at is left alone');
-
-  const skip = runSetup({
-    preinstall(home) {
-      mkdirSync(join(home, '.local', 'bin'), { recursive: true });
-      exe(join(home, '.local', 'bin', 'browse'), fakeBrowse(PIN));
-    },
-  });
-  assert.equal(skip.status, 0);
-  assert.equal(skip.parsed.steps.install, 'skip');
-  assert.deepEqual(skip.requests, []);
-  assert.deepEqual(verifySetup(skip.parsed, { version: PIN }), []);
-
-  const elsewhere = runSetup({ browsePath: '/opt/browse/bin/browse' });
-  assert.equal(elsewhere.status, 5);
-  assert.deepEqual(elsewhere.requests, []);
-});
