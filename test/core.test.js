@@ -455,6 +455,27 @@ test('setup verification: only a receiver-side clean read is ok', () => {
   assert.ok(garbage.length >= 4, garbage.join('\n'));
 });
 
+test('setup verification: an install that ran must report how, and a native one its verified sha512 (BBR-54)', () => {
+  const hex = 'ab'.repeat(64);
+  const withInstall = (lines) => setupOut().replace('@@BB@@ step install skip', lines.join('\n'));
+  const native = parseSetupOutput(withInstall(['@@BB@@ step install ok', '@@BB@@ install-via native', `@@BB@@ install-sha512 ${hex}`]));
+  assert.equal(native.installVia, 'native');
+  assert.equal(native.installSha512, hex);
+  assert.deepEqual(verifySetup(native, { version: '0.1.3' }), []);
+  const noHash = verifySetup(parseSetupOutput(withInstall(['@@BB@@ step install ok', '@@BB@@ install-via native'])), { version: '0.1.3' });
+  assert.match(noHash.join('\n'), /install ran but reported no verified sha512 \(via native\)/);
+  const noVia = verifySetup(parseSetupOutput(withInstall(['@@BB@@ step install ok'])), { version: '0.1.3' });
+  assert.match(noVia.join('\n'), /no verified sha512 \(via unknown\)/);
+  const shortHash = verifySetup(parseSetupOutput(withInstall(['@@BB@@ step install ok', '@@BB@@ install-via native', `@@BB@@ install-sha512 ${hex.slice(1)}`])), { version: '0.1.3' });
+  assert.match(shortHash.join('\n'), /no verified sha512/);
+  const npm = parseSetupOutput(withInstall(['@@BB@@ step install ok', '@@BB@@ install-via npm']));
+  assert.deepEqual(verifySetup(npm, { version: '0.1.3' }), [], 'npm (non-Linux only) checks the registry integrity itself');
+  const failed = verifySetup(parseSetupOutput(withInstall(['@@BB@@ step install fail'])), { version: '0.1.3' });
+  assert.match(failed.join('\n'), /step install: fail/);
+  const missing = verifySetup(parseSetupOutput(withInstall([])), { version: '0.1.3' });
+  assert.match(missing.join('\n'), /step install: did not run/);
+});
+
 test('stall: a traced call logs begin before it runs and end with its duration', () => {
   const log = new Logger();
   let now = 0;

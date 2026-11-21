@@ -370,10 +370,11 @@ export class Controller extends EventEmitter {
     this.logger.info('setup', `running setup (browse ${version})`);
     const res = await this.transport().script(SETUP_SCRIPT, [this.cfg.remoteBrowse, version], {
       controlDir: this.controlDir,
-      timeoutMs: 180_000,
+      timeoutMs: 300_000, // BBR-54: the native install's curl calls take at most about 4 minutes (see SETUP_SCRIPT)
     });
     for (const line of res.stderr.split('\n')) if (line.trim()) this.logger.info('setup', line.trim());
     const parsed = parseSetupOutput(res.stdout);
+    if (parsed.installVia) this.logger.info('setup', `installed browse via ${parsed.installVia}${parsed.installSha512 ? `, tarball sha512 ${parsed.installSha512}` : ''}`);
     const problems = verifySetup(parsed, { version });
     if (res.code !== 0) problems.unshift(res.timedOut ? 'setup timed out' : `setup exited ${res.code}: ${res.stdout.split('\n').filter((l) => l && !l.startsWith('@@')).pop() ?? ''}`);
     return { problems, steps: parsed.steps };

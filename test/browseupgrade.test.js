@@ -69,7 +69,9 @@ test('config: the single-host shape\'s top-level browseVersion stays the app pin
 
 function setupOut({ version, listen = ['127.0.0.1:19988'], autoupdate = 'ok' }) {
   return [
-    '@@BB@@ step install ok', `@@BB@@ step autoupdate ${autoupdate}`, '@@BB@@ step hostname ok', '@@BB@@ step restart ok',
+    // What SETUP_SCRIPT's native install prints since BBR-54: the method and the verified tarball hash.
+    '@@BB@@ step install ok', '@@BB@@ install-via native', `@@BB@@ install-sha512 ${'ab'.repeat(64)}`,
+    `@@BB@@ step autoupdate ${autoupdate}`, '@@BB@@ step hostname ok', '@@BB@@ step restart ok',
     `@@BB@@ version ${version}`,
     '@@BB@@ listen-begin', ...listen, '@@BB@@ listen-end',
     '@@BB@@ status-begin', JSON.stringify(statusJson({ connected: false })), '@@BB@@ status-end', '',
