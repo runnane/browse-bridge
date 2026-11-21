@@ -5,8 +5,12 @@ const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
 
 contextBridge.exposeInMainWorld('bridge', {
   // { overall, label, hosts: [per-host snapshot, …], configFailure: null | { path, message, backup, backupError },
-  //   app: { pollSeconds, browseVersion, configPath } }
+  //   app: { pollSeconds, browseVersion, checkUpdates, configPath },
+  //   update: { line, detail, subjects, canUpdate, canCheck, busy } (core/updater.js updateSummary) }
   state: invoke('state'),
+  // BBR-43: check for a newer browse-bridge now; fast-forward, install if needed and restart. Each resolves to `update` above.
+  checkForUpdates: invoke('checkForUpdates'),
+  updateNow: invoke('updateNow'),
   // An unreadable config file (BBR-36): read it again, or replace it with one empty host (the old bytes are kept).
   reloadConfig: invoke('reloadConfig'),
   startOver: invoke('startOver'),
@@ -32,7 +36,7 @@ contextBridge.exposeInMainWorld('bridge', {
   // and Test Connection for the form's unsaved { host, sshOptions, remoteBrowse } (core/sshtest.js's result).
   sshAliases: invoke('sshAliases'),
   testConnection: invoke('testConnection'),
-  // The General page (BBR-45): saveAppSettings({ pollSeconds }), and open config.json in the desktop's editor.
+  // The General page (BBR-45): saveAppSettings({ pollSeconds } or { checkUpdates }), and open config.json in the desktop's editor.
   saveAppSettings: invoke('saveAppSettings'),
   openConfigFile: invoke('openConfigFile'),
   // Copy the diagnostics bundle (core/diagnostics.js) to the clipboard; the argument is "hide host names". Resolves to its line count.

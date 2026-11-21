@@ -7,7 +7,7 @@ import { ConfigStore, DEFAULTS, UNREADABLE_REFUSAL, normalizeAppConfig, pairingA
 import { Logger } from '../src/core/log.js';
 import {
   AGENT_INSTALL_COMMAND, DEFAULT_RELAY_PORT, DEFAULT_REMOTE_BROWSE, PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration,
-  appMenuView, generalView, hostRows, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, parsePort, pickSelected, transportText, withHostSnapshot,
+  appMenuView, generalView, updateView, hostRows, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, parsePort, pickSelected, transportText, withHostSnapshot,
   aliasOptions, aliasWarning, parseTestForm, problemBar, testResultView,
 } from '../src/ui/viewmodel.js';
 
@@ -293,6 +293,19 @@ test('viewmodel: the General page shows the pin and the config path, and names t
   const v = generalView({ pollSeconds: 10, browseVersion: '0.1.4', configPath: '/cfg/config.json' });
   assert.deepEqual([v.pollSeconds, v.browseVersion, v.configPath], ['10', '0.1.4', '/cfg/config.json']);
   assert.match(v.pinNote, /not built yet \(BBR-41\)/);
+});
+
+test('viewmodel: the update notice shows in the status bar only when there is one, and About\'s buttons follow it (BBR-43)', () => {
+  assert.equal(generalView({ pollSeconds: 10, browseVersion: '0.1.4', configPath: '/c', checkUpdates: false }).checkUpdates, false);
+  assert.equal(generalView({ pollSeconds: 10, browseVersion: '0.1.4', configPath: '/c' }).checkUpdates, true, 'on unless main says off');
+  assert.deepEqual(updateView(null), { bar: null, text: '', subjects: [], showUpdate: false, canUpdate: false, canCheck: false });
+  const available = updateView({ line: 'Update available: 2 commits', detail: 'Update available: 2 commits on origin/main.', subjects: ['a', 'b'], canUpdate: true, canCheck: true, busy: false });
+  assert.deepEqual(available, { bar: 'Update available: 2 commits', text: 'Update available: 2 commits on origin/main.', subjects: ['a', 'b'], showUpdate: true, canUpdate: true, canCheck: true });
+  const failed = updateView({ line: null, detail: 'Could not check for updates: git fetch failed: it timed out.', subjects: [], canUpdate: false, canCheck: true, busy: false });
+  assert.equal(failed.bar, null, 'nothing in the status bar');
+  assert.equal(failed.showUpdate, false);
+  const updating = updateView({ line: 'Updating browse-bridge…', detail: 'Updating browse-bridge…', subjects: [], canUpdate: false, canCheck: false, busy: true });
+  assert.deepEqual([updating.bar, updating.showUpdate, updating.canUpdate], ['Updating browse-bridge…', true, false], 'the button stays, disabled, while it runs');
 });
 
 test('viewmodel: the application-menu checkbox is hidden for a packaged build and follows the entry otherwise (BBR-48)', () => {

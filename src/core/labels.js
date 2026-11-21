@@ -18,5 +18,14 @@ export const TEST_LABEL = 'Test Connection';
 /** The host form's field for extra `ssh -o` options (index.html shows it with a trailing colon). */
 export const SSH_OPTIONS_LABEL = 'SSH options';
 
+/** The General page's checkbox that turns the daily check for a newer browse-bridge on and off (BBR-43). */
+export const CHECK_UPDATES_LABEL = 'Check for updates';
+
+/** The About dialog's button that fast-forwards the source checkout, installs if needed and restarts (BBR-43). */
+export const UPDATE_LABEL = 'Update and Restart';
+
+/** The About dialog's button that checks for updates now, instead of waiting for the daily check (BBR-43). */
+export const CHECK_NOW_LABEL = 'Check Now';
+
 /** What the browse extension is called in the Chrome Web Store and on its toolbar button, since browse 0.1.5. */
 export const EXTENSION_NAME = 'OpenCode Browse';

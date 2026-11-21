@@ -49,11 +49,13 @@ export function trayTooltip(agg, { version = '', configFailure = null } = {}) {
  * retry, and the menu would be rebuilt (under the cursor) each time. The
  * window shows traffic.
  */
-export function trayMenuModel(agg, { autostart = false, version = '', configFailure = null } = {}) {
+export function trayMenuModel(agg, { autostart = false, version = '', configFailure = null, update = null } = {}) {
   return [
     { label: `browse-bridge: ${agg.label}`, enabled: false },
     // The config file did not load (BBR-36): the window has the details and the Reload / Start over choice.
     ...(configFailure ? [{ label: configFailureLine(configFailure), action: 'showWindow' }] : []),
+    // A newer browse-bridge on origin (BBR-43): opens About, where the update is one click. No timestamp, so the menu is not rebuilt each check.
+    ...(update ? [{ label: update, action: 'showAbout' }] : []),
     { type: 'separator' },
     ...agg.hosts.map(hostSubmenu),
     { type: 'separator' },
@@ -111,12 +113,15 @@ export function problemLine(problem, max = 160) {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
-/** Everything the tray displays for one aggregate snapshot (HostManager.snapshot()), plus ConfigStore's failure if any. */
-export function trayView(agg, { autostart = false, version = '', configFailure = null } = {}) {
+/**
+ * Everything the tray displays for one aggregate snapshot (HostManager.snapshot()), plus ConfigStore's failure if any
+ * and the updater's one notice line (core/updater.js updateSummary's `line`), if any.
+ */
+export function trayView(agg, { autostart = false, version = '', configFailure = null, update = null } = {}) {
   return {
     icon: agg.overall,
     tooltip: trayTooltip(agg, { version, configFailure }),
-    menu: trayMenuModel(agg, { autostart, version, configFailure }),
+    menu: trayMenuModel(agg, { autostart, version, configFailure, update }),
   };
 }
 
