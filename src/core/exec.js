@@ -106,7 +106,7 @@ export function createTransport(cfg, { localEnv = process.env } = {}) {
     return {
       kind: 'local',
       browse: (args, opts = {}) => run(browsePath, args, { env: localEnv, ...opts }),
-      script: (body, args = [], opts = {}) => run('bash', ['-s', '--', ...args], { input: body, env: localEnv, ...opts }),
+      script: (body, args = [], opts = {}) => run(SCRIPT_SHELL, ['-s', '--', ...args], { input: body, env: localEnv, ...opts }),
       closeMaster: async () => null,
     };
   }
@@ -142,7 +142,14 @@ export function sshBrowseArgs(cfg, args, controlDir = null) {
   return sshCommandArgs(cfg, [shQuotePath(cfg.remoteBrowse), ...args.map(shQuote)].join(' '), controlDir);
 }
 
-/** argv for `ssh <host> bash -s -- <args…>` with the script on stdin. */
+/**
+ * The shell every script() body runs under, here and on the remote (BBR-57).
+ * POSIX `sh`, not bash: a stock Alpine or other busybox-only host has no bash.
+ * So every script() body must be POSIX sh; the tests run them under dash.
+ */
+export const SCRIPT_SHELL = 'sh';
+
+/** argv for `ssh <host> sh -s -- <args…>` with the script on stdin. */
 export function sshScriptArgs(cfg, args, controlDir = null) {
-  return sshCommandArgs(cfg, ['bash', '-s', '--', ...args.map(shQuote)].join(' '), controlDir);
+  return sshCommandArgs(cfg, [SCRIPT_SHELL, '-s', '--', ...args.map(shQuote)].join(' '), controlDir);
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SETUP_SCRIPT, parseSetupOutput } from '../src/core/browse.js';
@@ -18,7 +18,12 @@ case "$1" in
 esac
 `;
 
-function runSetup(t, browsePath) {
+// BBR-57: exec.js runs SETUP_SCRIPT under `sh`; on Alpine that is busybox ash,
+// on Debian dash. bash stays covered for hosts whose sh is bash.
+const BUSYBOX = ['/usr/bin/busybox', '/bin/busybox'].find((p) => existsSync(p)) ?? null;
+const SHELLS = [['/bin/sh'], ['/usr/bin/bash'], ...(BUSYBOX ? [[BUSYBOX, 'sh']] : [])];
+
+function runSetup(t, [shell, ...pre], browsePath) {
   const root = mkdtempSync(join(tmpdir(), 'bb-tilde-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
@@ -38,7 +43,7 @@ function runSetup(t, browsePath) {
   const browse = join(home, 'bin', 'browse');
   writeFileSync(browse, FAKE_BROWSE);
   chmodSync(browse, 0o755);
-  const r = spawnSync('/usr/bin/bash', ['-s', '--', browsePath, PIN], {
+  const r = spawnSync(shell, [...pre, '-s', '--', browsePath, PIN], {
     input: SETUP_SCRIPT,
     env: { HOME: home, PATH: bin },
     encoding: 'utf8',
@@ -46,11 +51,13 @@ function runSetup(t, browsePath) {
   return { r, parsed: parseSetupOutput(r.stdout) };
 }
 
-for (const path of ['~/bin/browse', '$HOME/bin/browse']) {
-  test(`setup script: a remoteBrowse of ${path} is expanded, so the pinned install is found`, (t) => {
-    const { r, parsed } = runSetup(t, path);
-    assert.equal(r.status, 0, `exit ${r.status}: ${r.stdout}${r.stderr}`);
-    assert.equal(parsed.steps.install, 'skip');
-    assert.equal(parsed.version, PIN);
-  });
+for (const shell of SHELLS) {
+  for (const path of ['~/bin/browse', '$HOME/bin/browse']) {
+    test(`setup script (${shell.join(' ')}): a remoteBrowse of ${path} is expanded, so the pinned install is found`, (t) => {
+      const { r, parsed } = runSetup(t, shell, path);
+      assert.equal(r.status, 0, `exit ${r.status}: ${r.stdout}${r.stderr}`);
+      assert.equal(parsed.steps.install, 'skip');
+      assert.equal(parsed.version, PIN);
+    });
+  }
 }

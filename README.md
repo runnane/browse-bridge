@@ -38,7 +38,9 @@ the link (which browse itself does not encrypt) rides inside SSH.
   `~/.local` on the remote (no sudo). On Linux (x64 or arm64, glibc or musl)
   it downloads the native binary's tarball from the npm registry with `curl`
   and checks its SHA-512 against the registry's integrity, so the remote
-  needs neither npm nor Node; npm is used only on a non-Linux remote. It turns auto-update **off** persistently,
+  needs neither npm nor Node; npm is used only on a non-Linux remote. The
+  script runs under the remote's POSIX `sh`, so a busybox-only host such as
+  stock Alpine needs no bash. It turns auto-update **off** persistently,
   binds the relay to `127.0.0.1`, restarts it — then **verifies at the remote**
   (version, `autoUpdate.effective`, and that the relay port listens on loopback
   only). Any mismatch shows as a problem, never as success. A host that was

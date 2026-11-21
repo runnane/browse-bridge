@@ -78,7 +78,7 @@ test('exec: ssh transport passes BatchMode, "--" before the host, and one quoted
   assert.ok(a.includes('ControlPath=/run/bb/cm-%C'));
   assert.deepEqual(a.slice(-3), ['--', 'jon@dev004', `"$HOME"/.local/bin/browse pair 'x'\\''; touch /tmp/pwn'`]);
   const s = sshScriptArgs(cfg, ['$HOME/.local/bin/browse', '0.1.3']);
-  assert.equal(s.at(-1), `bash -s -- '$HOME/.local/bin/browse' 0.1.3`, 'the path reaches the script literally; the script expands it');
+  assert.equal(s.at(-1), `sh -s -- '$HOME/.local/bin/browse' 0.1.3`, 'the path reaches the script literally; the script expands it');
   assert.ok(!s.some((x) => x.startsWith('ControlPath')), 'no multiplexing unless asked');
   for (const argv of [a, s]) assert.ok(argv.includes('ClearAllForwardings=yes'), 'a command call never runs the user\'s LocalForward');
 });

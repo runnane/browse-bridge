@@ -23,6 +23,14 @@ Is the pin still safe against upstream's newest stable? `node scripts/check-brow
 The gates need node plus the system tools the setup script uses (bash, sh,
 tar, gzip, coreutils, grep, sed, awk, openssl), all from the host, nothing from
 `node_modules`, so a fresh worktree is enough (`worktreeSafe: true`).
+`/bin/sh` must not be bash (a test refuses it): every `script()` body runs
+remotely under `sh -s` (BBR-57), and the POSIX runs are only evidence where
+`sh` is dash. busybox is optional; where present, the parse check and
+`test/setup-tilde.test.js` also run under its ash, Alpine's `sh`. It cannot run
+the whole-script cases: ash finds its own `uname`, `od`, `tar` applets whatever
+`PATH` says, so the fakes would not hold. Note that `sh -n` passes a bash
+substring like `${x:2}`; only running the script (dash: "Bad substitution")
+catches it.
 `npm install` is needed only to *launch* the app (Electron).
 
 ## What each test needs, and leaves behind
@@ -32,7 +40,7 @@ tar, gzip, coreutils, grep, sed, awk, openssl), all from the host, nothing from
 | `test/integration.test.js` | a real browse relay, throwaway `HOME` | relay 39988, proxy 127.0.0.2:39988, inner 39991 | the pid `browse status` reports |
 | `test/ssh.test.js` | an unprivileged `sshd` + a relay, throwaway keys/`HOME` | sshd 39922, relay 39978, proxy 127.0.0.3:39978, forward 39981 | the sshd pid file and the relay's port owner |
 | `test/sshtest-sshd.test.js` | an unprivileged `sshd`, throwaway keys/known_hosts/`HOME`, a stub `browse` script; needs no `BROWSE_BIN`, so it runs whenever `/usr/sbin/sshd` exists | sshd 39924 | the sshd pid file |
-| `test/setup-script.test.js` | `SETUP_SCRIPT` under `bash -s` in a throwaway `HOME`, against a fake `curl` serving a locally made tarball; PATH is an allow-list of symlinked host tools plus fakes, never `/usr/bin`, so the real curl and npm cannot run | none | nothing to stop (the fake browse only prints); its `bb-setup-*` / `bb-piece-*` temp dirs are removed after each test (BBR-61) |
+| `test/setup-script.test.js` | `SETUP_SCRIPT` under `sh -s` (dash) and `bash -s` in a throwaway `HOME`, against a fake `curl` serving a locally made tarball; PATH is an allow-list of symlinked host tools plus fakes, never `/usr/bin`, so the real curl and npm cannot run | none | nothing to stop (the fake browse only prints); its `bb-setup-*` / `bb-piece-*` temp dirs are removed after each test (BBR-61) |
 
 `node --test` runs files **in parallel**, so the two files' ports must never
 overlap. That happened once and made both tests fail on each other's relay.
