@@ -80,6 +80,8 @@ function hostSubmenu(h) {
     label: `${hostTitle(h)}: ${hostStateText(h)}`,
     submenu: [
       { label: h.host || 'no ssh host', enabled: false },
+      // What to do about an ssh failure (BBR-46). Its text holds no countdown, so the menu is not rebuilt each retry.
+      ...(h.problem ? [{ label: problemLine(h.problem), enabled: false }] : []),
       ...(h.warnings ?? []).map((w) => ({ label: `⚠ ${w}`, enabled: false })),
       { type: 'separator' },
       h.connected
@@ -100,6 +102,12 @@ function hostSubmenu(h) {
  */
 export function configFailureLine(failure, max = 120) {
   const line = `⚠ Cannot read ${failure.path}: ${String(failure.message).replace(/\s+/g, ' ')}`;
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+/** A host's classified ssh failure (snapshot `problem`) as one menu line, cut to a length a menu shows. */
+export function problemLine(problem, max = 160) {
+  const line = `✕ ${String(problem.text).replace(/\s+/g, ' ')}`;
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 

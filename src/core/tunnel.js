@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { baseSshOptions } from './exec.js';
 import { probePort } from './proxy.js';
+import { classifySshError } from './ssherror.js';
 
 /** Backoff after the Nth consecutive failure: 1s, 2s, 4s … capped at 30s. */
 export function backoffMs(failures) {
@@ -44,6 +45,11 @@ export class TunnelSupervisor extends EventEmitter {
     this.remotePort = cfg.remotePort;
     this.timer = null;
     this.wanted = false;
+    /**
+     * The last exit's ssh failure when classifySshError recognised it ({ kind, text }), else null.
+     * Kept across the retry's "starting" so the guidance does not flicker; cleared once the forward is up or stopped.
+     */
+    this.problem = null;
   }
 
   setState(state, detail = '') {
@@ -96,6 +102,7 @@ export class TunnelSupervisor extends EventEmitter {
     clearTimeout(this.timer);
     this.timer = null;
     this.killChild();
+    this.problem = null;
     this.setState('stopped');
   }
 
@@ -142,6 +149,7 @@ export class TunnelSupervisor extends EventEmitter {
       if (await probePort(this.cfg.innerPort, { timeoutMs: 500 })) {
         if (this.child !== child) return;
         this.failures = 0;
+        this.problem = null;
         this.setState('up', `127.0.0.1:${this.cfg.innerPort} → ${this.cfg.host}:${this.remotePort}`);
         this.log('info', `tunnel up (ssh pid ${child.pid})`);
         return;
@@ -154,11 +162,13 @@ export class TunnelSupervisor extends EventEmitter {
   onExit(code, signal, stderr) {
     if (!this.wanted) return;
     this.failures++;
-    const last = String(stderr).trim().split('\n').filter(Boolean).pop() ?? '';
+    // The detail carries what to do (BBR-46); the log keeps the line ssh printed.
+    const c = classifySshError(stderr, { host: this.cfg.host });
+    this.problem = c.kind === 'unknown' ? null : { kind: c.kind, text: c.text };
     const why = signal ? `signal ${signal}` : `exit ${code}`;
     const wait = backoffMs(this.failures);
-    this.setState('retrying', `${why}${last ? `: ${last}` : ''} — retry in ${Math.round(wait / 1000)}s`);
-    this.log('error', `tunnel ended (${why})${last ? `: ${last}` : ''}`);
+    this.setState('retrying', `${why}${c.text ? `: ${c.text}` : ''} — retry in ${Math.round(wait / 1000)}s`);
+    this.log('error', `tunnel ended (${why})${c.line ? `: ${c.line}` : ''}`);
     this.timer = setTimeout(() => this.spawnOnce(), wait);
   }
 }

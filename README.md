@@ -124,8 +124,11 @@ Use the **plain** host (e.g. `jon@dev004`), not an alias that carries a
 `localhost:19988` and reports that address "in use" otherwise.
 
 1. In the window, set **SSH host** (`jon@dev004` or an `~/.ssh/config` alias)
-   on the Settings tab and **Apply**. For another host, use **Add Host…**
-   under the host list.
+   on the Settings tab and **Apply**. The field suggests the aliases in your
+   `~/.ssh/config` and warns about one with a `LocalForward`; **Test
+   Connection** tries the login and the remote browse before anything is
+   saved, and says what to do when ssh refuses. For another host, use
+   **Add Host…** under the host list.
 2. **Set Up Host** → expect "Host verified".
 3. Install the **OpenCode Browse** extension in Edge/Chrome (Chrome Web Store; in Edge
    allow extensions from other stores).

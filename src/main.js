@@ -11,6 +11,8 @@ import { autostartArgv, isAppMenuEnabled, isAutostartEnabled, setAppMenu, setAut
 import { HostNotifier, TrayRenderer, coalesce, trayView } from './core/tray.js';
 import { readVersion } from './core/version.js';
 import { aboutInfo, linkUrl } from './core/about.js';
+import { readSshAliases } from './core/sshconfig.js';
+import { testConnection } from './core/sshtest.js';
 import { iconPng, trayIconPng } from './icons.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -454,6 +456,20 @@ function registerIpc() {
     logger.info('config', `added host ${clean.id} (${clean.host || '—'}, pairs with ${pairingAddress(clean)})`);
     trayChanged();
     return clean;
+  });
+  // BBR-46: the page names no path; main reads the user's own ~/.ssh/config (and its Includes). The list is never logged.
+  ipcMain.handle('sshAliases', () => readSshAliases(os.homedir()));
+  // Test the form's unsaved fields. testConnection runs them through normalizeConfig before any ssh, as a save would.
+  ipcMain.handle('testConnection', async (_e, raw) => {
+    const fields = {
+      host: String(raw?.host ?? ''),
+      sshOptions: Array.isArray(raw?.sshOptions) ? raw.sshOptions.map(String) : [],
+      remoteBrowse: raw?.remoteBrowse ? String(raw.remoteBrowse) : undefined,
+    };
+    const result = await testConnection(fields, { browseVersion: hosts.config?.browseVersion ?? PINNED_BROWSE_VERSION });
+    // Outcomes only: an unsaved destination is no configured host, so Copy Diagnostics could not hide it.
+    logger.info('test', `test connection: ${result.steps.map((s) => `${s.name} ${s.kind ?? s.level}`).join(', ')}`);
+    return result;
   });
   ipcMain.handle('removeHost', async (_e, id) => {
     await hosts.removeHost(id, save);

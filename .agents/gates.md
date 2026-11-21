@@ -29,6 +29,7 @@ The gates need only node, so a fresh worktree is enough (`worktreeSafe: true`).
 | --- | --- | --- | --- |
 | `test/integration.test.js` | a real browse relay, throwaway `HOME` | relay 39988, proxy 127.0.0.2:39988, inner 39991 | the pid `browse status` reports |
 | `test/ssh.test.js` | an unprivileged `sshd` + a relay, throwaway keys/`HOME` | sshd 39922, relay 39978, proxy 127.0.0.3:39978, forward 39981 | the sshd pid file and the relay's port owner |
+| `test/sshtest-sshd.test.js` | an unprivileged `sshd`, throwaway keys/known_hosts/`HOME`, a stub `browse` script; needs no `BROWSE_BIN`, so it runs whenever `/usr/sbin/sshd` exists | sshd 39924 | the sshd pid file |
 
 `node --test` runs files **in parallel**, so the two files' ports must never
 overlap. That happened once and made both tests fail on each other's relay.

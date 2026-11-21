@@ -156,6 +156,7 @@
   /* Inline form errors (next to the field they are about) */
   .hint { margin-top: -4px; }
   .field-error { color: var(--bad); margin-top: 2px; }
+  .field-warn { color: var(--warn); margin-top: 2px; }
   input.invalid { border-color: var(--bad); }
   .form-title { font-weight: 600; margin: 0 0 12px; }
   .buttons .left { margin-right: auto; }
@@ -322,8 +323,9 @@
           <label class="label" for="fName">Name:</label>
           <input type="text" id="fName" name="hostName" placeholder="optional, e.g. build box" spellcheck="false">
           <label class="label" for="fHost">SSH host:</label>
-          <input type="text" id="fHost" name="host" placeholder="e.g. jon@dev004" spellcheck="false">
-          <span></span><div class="hint"><div class="muted">user@host, or an alias from ~/.ssh/config (without a LocalForward)</div><div class="field-error" id="errHost" hidden></div></div>
+          <input type="text" id="fHost" name="host" placeholder="e.g. jon@dev004" spellcheck="false" list="sshAliases" autocomplete="off">
+          <datalist id="sshAliases"></datalist>
+          <span></span><div class="hint"><div class="muted">user@host, or an alias from ~/.ssh/config (without a LocalForward)</div><div class="field-warn" id="warnHost" hidden></div><div class="field-error" id="errHost" hidden></div></div>
           <label class="label" for="fAddr">Local address:</label>
           <input type="text" id="fAddr" name="localAddress" spellcheck="false" placeholder="e.g. 127.0.0.2" style="width:140px">
           <span></span><div class="hint"><div class="muted" id="addrHint">Each host has its own 127.0.0.x; the port is always the relay's own</div><div class="field-error" id="errLocalAddress" hidden></div></div>
@@ -351,8 +353,10 @@
             <span></span><div class="hint"><div class="muted">Shown here, not edited: local (browse on this machine, for tests) is set in the config file only</div></div>
           </div>
         </details>
+        <div class="msg" id="testResult" role="status" hidden style="margin-top:12px"><p id="testResultText"></p></div>
         <div class="buttons">
           <button type="button" class="btn left" id="btnRemoveHost" title="Disconnect this host and remove it from the list">Remove Host…</button>
+          <button type="button" class="btn" id="btnTest" title="Log in over ssh with these settings and check the remote browse, before anything is saved">Test Connection</button>
           <button type="button" class="btn" id="btnReset">Reset</button>
           <button type="submit" class="btn default" id="btnApply" title="Ctrl+Enter">Apply</button>
         </div>
@@ -437,7 +441,7 @@
 
       <h3>First run</h3>
       <ol>
-        <li>On the <b>Settings</b> tab, enter the <b>SSH host</b> (<span class="mono">user@host</span> or an <span class="mono">~/.ssh/config</span> alias without a LocalForward) and click <b>Apply</b>.
+        <li>On the <b>Settings</b> tab, enter the <b>SSH host</b> (<span class="mono">user@host</span> or an <span class="mono">~/.ssh/config</span> alias without a LocalForward; the field suggests the aliases it finds) and click <b>Apply</b>. <b>Test Connection</b> tries the login and the remote browse first, without saving.
           The app never prompts for a password: use key-based ssh (an agent, or <span class="mono">IdentityFile</span> under SSH options).</li>
         <li>Click <b>Set Up Host</b>. It installs the pinned browse (<span class="mono" id="helpBrowseVersion"></span>) on the remote, turns auto-update off,
           binds the relay to loopback and checks all of it there. Expect a "Host verified" message.</li>

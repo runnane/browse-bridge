@@ -268,12 +268,14 @@ test('hosts: one host\'s tunnel failing leaves the other host\'s bridge untouche
   const bBefore = b.snapshot();
   assert.deepEqual([bBefore.overall === 'error', bBefore.connected, bBefore.tunnel.state], [false, true, 'up']);
 
-  children[0].stderr.emit('data', 'Connection refused\n');
+  children[0].stderr.emit('data', 'ssh: connect to host dev004 port 22: Connection refused\n');
   children[0].emit('exit', 255, null);
   const a = mgr.snapshot().hosts[0];
   assert.equal(a.tunnel.state, 'retrying');
   assert.equal(a.overall, 'error');
-  assert.match(a.tunnel.detail, /exit 255: Connection refused/);
+  assert.match(a.tunnel.detail, /exit 255: dev004 refused the connection on port 22/);
+  assert.equal(a.problem?.kind, 'refused', 'the host\'s snapshot carries the guidance for the message bar and tray');
+  assert.equal(mgr.snapshot().hosts[1].problem, null, 'the other host carries none');
 
   const check = async () => {
     assert.equal(mgr.get('b'), b, 'b is the same controller');

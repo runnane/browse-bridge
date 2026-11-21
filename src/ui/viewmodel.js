@@ -57,7 +57,16 @@ export function pickSelected(hosts, selectedId) {
 }
 
 /** Shared with core (tray, controller) so a message and the control it names cannot drift; see core/labels.js. */
-export { SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME } from '../core/labels.js';
+export { SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME, TEST_LABEL, SSH_OPTIONS_LABEL } from '../core/labels.js';
+
+/**
+ * The message bar for a host's recognised ssh failure (snapshot `problem`,
+ * from core/ssherror.js via the tunnel or a status poll), or null (BBR-46).
+ */
+export function problemBar(snap) {
+  if (!snap?.problem?.text) return null;
+  return { kind: 'bad', text: `${hostTitle(snap)}: ${snap.problem.text}` };
+}
 
 /**
  * A host config's pairing address, as config.js pairingAddress() gives it
@@ -271,6 +280,45 @@ export function parseHostForm(form, { adding = false } = {}) {
     }
   }
   return { fields };
+}
+
+// ---------- Test Connection and the ~/.ssh/config aliases (BBR-46) ----------
+
+/**
+ * The host form's fields Test Connection needs ({ host, sshOptions,
+ * remoteBrowse }), checked as Add checks them: a host is required and the
+ * remote browse path must be one the form accepts. Returns { fields } or
+ * { error, field }.
+ */
+export function parseTestForm(form) {
+  const parsed = parseHostForm({ host: form.host, sshOptions: form.sshOptions, remoteBrowse: form.remoteBrowse }, { adding: true });
+  if (parsed.error) return parsed;
+  const { host, sshOptions, remoteBrowse } = parsed.fields;
+  return { fields: { host, sshOptions, ...(remoteBrowse ? { remoteBrowse } : {}) } };
+}
+
+/** core/sshtest.js's result as the form's in-place bar: { kind: ok|warn|bad, text }. */
+export function testResultView(result) {
+  if (!result) return null;
+  const text = (result.steps ?? []).map((s) => s.text).join(' ');
+  return { kind: result.level ?? (result.ok ? 'ok' : 'bad'), text: text || (result.ok ? 'Connected.' : 'The test failed.') };
+}
+
+/** The ~/.ssh/config aliases ([{ alias, localForward }], core/sshconfig.js) as the SSH host field's suggestions. */
+export function aliasOptions(aliases) {
+  return (aliases ?? []).map((a) => ({ value: a.alias, label: a.localForward ? 'has a LocalForward: use the plain host instead' : '' }));
+}
+
+/**
+ * The warning under the SSH host field when it names an alias that carries a
+ * LocalForward, else null. README First run says not to use one: the app
+ * forwards the relay itself, and the alias's own forward collides with it.
+ */
+export function aliasWarning(aliases, host) {
+  const h = String(host ?? '').trim();
+  const a = (aliases ?? []).find((x) => x.localForward && x.alias.toLowerCase() === h.toLowerCase());
+  if (!a) return null;
+  return `${a.alias} carries a LocalForward in ~/.ssh/config. The app forwards the relay itself and that forward collides with it: use the plain user@host instead, or an alias without a LocalForward.`;
 }
 
 /** How a host's transport reads in the Advanced section, which shows it and never edits it. */

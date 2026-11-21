@@ -28,6 +28,10 @@ contextBridge.exposeInMainWorld('bridge', {
   saveConfig: invoke('saveConfig'),
   addHost: invoke('addHost'),
   removeHost: invoke('removeHost'),
+  // BBR-46: the Host aliases in ~/.ssh/config ([{ alias, localForward }]; main reads the file, the page names no path),
+  // and Test Connection for the form's unsaved { host, sshOptions, remoteBrowse } (core/sshtest.js's result).
+  sshAliases: invoke('sshAliases'),
+  testConnection: invoke('testConnection'),
   // The General page (BBR-45): saveAppSettings({ pollSeconds }), and open config.json in the desktop's editor.
   saveAppSettings: invoke('saveAppSettings'),
   openConfigFile: invoke('openConfigFile'),
