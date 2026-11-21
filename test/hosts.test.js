@@ -261,6 +261,12 @@ test('hosts: one host\'s tunnel failing leaves the other host\'s bridge untouche
   t.after(() => mgr.stopAll());
   const sshHost = { id: 'a', host: 'dev004', localAddress: '127.0.0.4', innerPort: p[1], remotePort: p[2], autoConnect: true };
   await mgr.apply({ pollSeconds: 60, hosts: [sshHost, localHost('b', p.slice(3, 6))] });
+  // Never a real ssh (BBR-59): connect() armed a poll at 0 ms, which the tick below fires and which
+  // would run `ssh dev004 browse status`. Stub each controller's poll before any tick.
+  const polled = [];
+  for (const id of mgr.ids()) {
+    mgr.get(id).pollNow = async () => { polled.push(id); };
+  }
   assert.equal(children.length, 1, 'only host a has an ssh tunnel');
   assert.equal(children[0].args.at(-1), 'dev004');
   const b = mgr.get('b');
@@ -289,6 +295,7 @@ test('hosts: one host\'s tunnel failing leaves the other host\'s bridge untouche
 
   t.mock.timers.tick(1000);
   assert.equal(children.length, 2, 'a retries on its own backoff');
+  assert.ok(polled.includes('a'), 'the connect-time poll of the ssh host reached the stub, not a real ssh');
   await check();
 });
 
