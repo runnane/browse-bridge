@@ -7,7 +7,7 @@
 // that PATH, so the real curl and npm cannot be reached even by a test bug.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -437,6 +437,52 @@ for (const shell of SHELLS) {
     const elsewhere = runSetup({ browsePath: '/opt/browse/bin/browse' });
     assert.equal(elsewhere.status, 5);
     assert.deepEqual(elsewhere.requests, []);
+  });
+
+  // BBR-68: dash runs no EXIT trap when a signal kills the script, so the script
+  // carries `trap 'exit 1' HUP INT TERM`. A setup the controller times out must
+  // not leave its mktemp -d directory behind on the remote host.
+  test(`setup script (${shell}): the mktemp dir is removed when SIGTERM kills the script while curl is blocked`, async (t) => {
+    const root = tmpRoot('bb-signal-');
+    const home = join(root, 'home');
+    const tmp = join(root, 'tmp');
+    mkdirSync(home);
+    mkdirSync(tmp);
+    const bin = makeBin(root, { extra: ['sleep'] });
+    const curlPid = join(root, 'curl.pid');
+    // Parked after `tmp=$(mktemp -d)` and the traps; exec makes the recorded pid the sleep itself.
+    exe(join(bin, 'curl'), `#!/bin/sh\necho $$ > '${curlPid}'\nexec sleep 30\n`);
+    t.after(() => {
+      try { process.kill(Number(readFileSync(curlPid, 'utf8').trim()), 'SIGKILL'); } catch { /* already gone, or never started */ }
+    });
+    const child = spawn(shell, ['-s', '--', '$HOME/.local/bin/browse', PIN], {
+      env: { HOME: home, PATH: bin, TMPDIR: tmp },
+      stdio: ['pipe', 'ignore', 'ignore'],
+    });
+    t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+    const exited = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })));
+    child.stdin.end(SETUP_SCRIPT);
+
+    const until = async (what, ok) => {
+      const deadline = Date.now() + 5000;
+      while (!ok()) {
+        assert.ok(Date.now() < deadline, `timed out waiting for ${what}`);
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    };
+    // curl has started (so mktemp and both traps ran) and the temp dir exists.
+    await until('the blocked curl to start', () => existsSync(curlPid) && readFileSync(curlPid, 'utf8').trim() !== '');
+    assert.equal(readdirSync(tmp).length, 1, 'the script made its mktemp dir before blocking');
+
+    // A trap waits for the foreground command (the blocked curl) to end, so the
+    // TERM goes to both, as a process-group TERM from sshd or the controller would send it.
+    child.kill('SIGTERM');
+    process.kill(Number(readFileSync(curlPid, 'utf8').trim()), 'SIGTERM');
+    const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
+    const { signal } = await exited;
+    clearTimeout(timer);
+    assert.notEqual(signal, 'SIGKILL', 'the script exited on the TERM, not on the test deadline');
+    assert.deepEqual(readdirSync(tmp), [], 'the mktemp dir is gone after the signal');
   });
 
   test(`setup script (${shell}): text from outside the script is printed as-is, backslashes and all`, () => {
