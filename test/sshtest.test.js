@@ -1,7 +1,7 @@
 /** Test Connection (BBR-46) against a fake exec: every outcome, and the argv it hands ssh. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { testConnection, TEST_TIMEOUT_MS } from '../src/core/sshtest.js';
+import { testConnection, expectedBrowseVersion, TEST_TIMEOUT_MS } from '../src/core/sshtest.js';
 import { SETUP_LABEL } from '../src/core/labels.js';
 
 const ok = (stdout = '') => ({ code: 0, signal: null, stdout, stderr: '', timedOut: false });
@@ -93,4 +93,35 @@ test('test connection: a destination ssh would read as an option is refused befo
   await assert.rejects(testConnection({ host: 'dev004', sshOptions: ['NoEquals'] }, { exec }), /sshOptions must be/);
   await assert.rejects(testConnection({ host: '' }, { exec }), /Enter the SSH host/);
   assert.equal(calls.length, 0);
+});
+
+// BBR-62: the expected version comes from the stored host, never from the page.
+const APP = { browseVersion: '0.1.4', hosts: [{ id: 'own', browseVersion: '0.1.6' }, { id: 'plain' }] };
+
+/** What Test Connection says about a host (hostId) whose remote browse reports `reported`. */
+async function testHost(hostId, reported) {
+  const { exec } = fakeExec(ok(), ok(`${reported}\n`));
+  return testConnection(FIELDS, { ...expectedBrowseVersion(APP, hostId), exec });
+}
+
+test('test connection (BBR-62): an existing host with its own version tests ok at that version', async () => {
+  const r = await testHost('own', '0.1.6');
+  assert.deepEqual([r.ok, r.level], [true, 'ok']);
+  assert.match(r.steps[1].text, /browse 0\.1\.6 at .*, the version this host is set to run\./);
+});
+
+test('test connection (BBR-62): the same host warns when it reports another version, naming its own version', async () => {
+  const r = await testHost('own', '0.1.4');
+  assert.equal(r.level, 'warn');
+  assert.match(r.steps[1].text, /browse 0\.1\.4 at .*, not the version this host is set to run, 0\.1\.6: /);
+});
+
+test('test connection (BBR-62): Add Host (no id, or an id that is not stored) and a host without its own version use the pin', async () => {
+  assert.deepEqual(expectedBrowseVersion(APP, null), { browseVersion: '0.1.4', pinnedBrowseVersion: '0.1.4' });
+  assert.deepEqual(expectedBrowseVersion(APP, 'nope'), { browseVersion: '0.1.4', pinnedBrowseVersion: '0.1.4' });
+  assert.equal(expectedBrowseVersion(APP, 'plain').browseVersion, '0.1.4');
+  const r = await testHost(null, '0.1.6');
+  assert.equal(r.level, 'warn');
+  assert.match(r.steps[1].text, /browse 0\.1\.6 at .*, not the pinned 0\.1\.4: /);
+  assert.equal((await testHost(null, '0.1.4')).level, 'ok');
 });

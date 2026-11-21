@@ -27,14 +27,28 @@ function sshFailure(res, host, timeoutMs) {
 }
 
 /**
+ * Which browse version Test Connection expects (BBR-62). The page never names
+ * one: for an existing host (`hostId` found in the stored config) it is that
+ * host's effective version (its own from BBR-41, else the pin); for Add Host
+ * (no id, or one not stored) it is the app pin.
+ */
+export function expectedBrowseVersion(app, hostId, fallbackPin = DEFAULTS.browseVersion) {
+  const pin = app?.browseVersion ?? fallbackPin;
+  const host = typeof hostId === 'string' ? app?.hosts?.find((h) => h.id === hostId) : null;
+  return { browseVersion: host?.browseVersion || pin, pinnedBrowseVersion: pin };
+}
+
+/**
  * Run the test for the form's fields ({ host, sshOptions, remoteBrowse }).
- * `browseVersion` is the app's pin. Resolves (never rejects on an ssh
+ * `browseVersion` is the version the host is expected to run (the app's pin
+ * unless the host has its own, see expectedBrowseVersion) and
+ * `pinnedBrowseVersion` the pin, which only changes the wording. Resolves (never rejects on an ssh
  * failure) to { ok, level, steps: [{ name, level, kind?, text }] }, where
  * `level` is the worst step's: "ok", "warn" (it connects; browse needs
  * setting up) or "bad". A field normalizeConfig refuses throws before any ssh
  * runs, so a destination such as "-oProxyCommand=…" never reaches ssh.
  */
-export async function testConnection(fields, { browseVersion = DEFAULTS.browseVersion, exec = run, timeoutMs = TEST_TIMEOUT_MS } = {}) {
+export async function testConnection(fields, { browseVersion = DEFAULTS.browseVersion, pinnedBrowseVersion = browseVersion, exec = run, timeoutMs = TEST_TIMEOUT_MS } = {}) {
   const cfg = normalizeConfig({
     transport: 'ssh',
     host: fields.host,
@@ -73,11 +87,13 @@ export async function testConnection(fields, { browseVersion = DEFAULTS.browseVe
     steps.push({ name: 'browse', level: 'bad', kind: 'error', text: `browse version failed (exit ${ver.code})${last ? `: ${last}` : ''}.` });
   } else {
     const version = String(ver.stdout).trim().split('\n').filter(Boolean).pop() ?? '';
+    const own = pin !== pinnedBrowseVersion; // the host runs its own version (BBR-41)
+    const what = own ? 'the version this host is set to run' : 'the pinned version';
     if (version === pin) {
-      steps.push({ name: 'browse', level: 'ok', kind: 'pinned', text: `browse ${version} at ${path}, the pinned version.` });
+      steps.push({ name: 'browse', level: 'ok', kind: 'pinned', text: `browse ${version} at ${path}, ${what}.` });
     } else {
       const fix = managed ? `${SETUP_LABEL} installs ${pin}` : `${SETUP_LABEL} installs only at ${DEFAULTS.remoteBrowse}, so install ${pin} here yourself`;
-      steps.push({ name: 'browse', level: 'warn', kind: 'other-version', text: `browse ${version || '(no version printed)'} at ${path}, not the pinned ${pin}: ${fix}.` });
+      steps.push({ name: 'browse', level: 'warn', kind: 'other-version', text: `browse ${version || '(no version printed)'} at ${path}, not ${own ? 'the version this host is set to run,' : 'the pinned'} ${pin}: ${fix}.` });
     }
   }
   return done();
