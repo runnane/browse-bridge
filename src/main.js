@@ -1,7 +1,9 @@
 import { app, BrowserWindow, Menu, Notification, Tray, clipboard, ipcMain, nativeImage, nativeTheme, shell } from 'electron';
+import os from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ConfigStore, normalizeAppConfig, pairingAddress } from './core/config.js';
+import { ConfigStore, PINNED_BROWSE_VERSION, normalizeAppConfig, pairingAddress } from './core/config.js';
+import { buildDiagnostics } from './core/diagnostics.js';
 import { Logger } from './core/log.js';
 import { timed, createLagMonitor } from './core/stall.js';
 import { HOST_ACTIONS, HostManager, runHostAction } from './core/hosts.js';
@@ -270,7 +272,31 @@ const APP_ACTIONS = {
   showLogs: (_item, id) => showWindow({ id, tab: 'log' }),
   showHelp: () => showWindow({ dialog: 'help' }),
   showAbout: () => showWindow({ dialog: 'about' }),
+  // The tray always hides host names; the About dialog's checkbox can show them.
+  copyDiagnostics: () => { copyDiagnostics(true); },
 };
+
+/** Gather the inputs, build the bundle (core/diagnostics.js) and put it on the clipboard. Returns the line count. */
+function copyDiagnostics(hideHostNames) {
+  const text = buildDiagnostics({
+    version: appVersion,
+    runtime: {
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      os: `${process.platform} ${os.release()}`,
+      session: process.env.XDG_SESSION_TYPE || '',
+    },
+    pinned: PINNED_BROWSE_VERSION,
+    hosts: hosts.snapshot().hosts,
+    log: logger.ring,
+    hideHostNames: hideHostNames !== false,
+    homeDir: os.homedir(),
+  });
+  clipboard.writeText(text);
+  logger.info('app', `diagnostics copied (${text.split('\n').length} lines, host names ${hideHostNames !== false ? 'hidden' : 'shown'})`);
+  return text.split('\n').length;
+}
 
 /** core/tray.js's plain menu model → an Electron Menu, with the clicks attached here. */
 function buildMenu(model) {
@@ -390,6 +416,7 @@ function registerIpc() {
   for (const action of Object.keys(HOST_ACTIONS)) {
     ipcMain.handle(action, (_e, id) => runHostAction(hosts, action, id));
   }
+  ipcMain.handle('copyDiagnostics', (_e, hideHostNames) => copyDiagnostics(hideHostNames));
   ipcMain.handle('copy', (_e, text) => clipboard.writeText(String(text)));
   ipcMain.handle('openLogFile', () => shell.openPath(paths().log));
   ipcMain.handle('autostart', () => isAutostartEnabled());

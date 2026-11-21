@@ -112,6 +112,16 @@ $('btnAbout').onclick = () => openInfo('about');
 $('btnHelpAbout').onclick = () => openInfo('about');
 $('btnHelpClose').onclick = () => $('helpDialog').close();
 $('btnAboutClose').onclick = () => $('aboutDialog').close();
+// BBR-47: the bundle is built in main (core/diagnostics.js); the status shows inside the dialog, which covers the flash bars.
+$('btnCopyDiag').onclick = async () => {
+  const status = $('diagStatus');
+  try {
+    await bridge.copyDiagnostics($('diagHide').checked);
+    status.textContent = $('diagHide').checked ? 'Copied; host names hidden.' : 'Copied; host names included.';
+  } catch (err) {
+    status.textContent = cleanError(err.message);
+  }
+};
 // Links name a key in core/about.js; main opens it in the system browser, and refuses any other.
 for (const b of document.querySelectorAll('[data-link]')) {
   b.addEventListener('click', (ev) => {

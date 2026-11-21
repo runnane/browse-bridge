@@ -71,12 +71,12 @@ test('tray: each host gets a submenu of its own controls, bound to its id; app-w
   const labels = (items) => items.map((i) => i.label ?? '—');
   assert.deepEqual(labels(menu), [
     'browse-bridge: Some hosts down', '—', 'dev004: Connected', 'dev005: Stopped', '—',
-    'Show window', 'Open log file', 'Start at login', '—', 'Help', 'About browse-bridge…', '—', 'Quit',
+    'Show window', 'Open log file', 'Start at login', '—', 'Help', 'About browse-bridge…', 'Copy diagnostics', '—', 'Quit',
   ]);
   const versioned = trayMenuModel(agg(host('dev004', 'ready'), host('dev005', 'stopped')), { autostart: true, version: VERSION });
   assert.deepEqual(labels(versioned), [
     'browse-bridge: Some hosts down', '—', 'dev004: Connected', 'dev005: Stopped', '—',
-    'Show window', 'Open log file', 'Start at login', '—', 'Help', 'About browse-bridge…', '—', '0.1.0+3 1b86d65', 'Quit',
+    'Show window', 'Open log file', 'Start at login', '—', 'Help', 'About browse-bridge…', 'Copy diagnostics', '—', '0.1.0+3 1b86d65', 'Quit',
   ]);
   assert.equal(versioned.at(-2).enabled, false, 'the version line is not clickable');
   assert.equal(versioned.at(-2).action, undefined);
@@ -84,7 +84,7 @@ test('tray: each host gets a submenu of its own controls, bound to its id; app-w
   assert.deepEqual(trayView(agg(host('dev004', 'ready')), { version: VERSION }).menu.at(-2), { label: VERSION, enabled: false });
   const actions = (items) => items.filter((i) => i.action).map((i) => [i.label, i.action, i.hostId ?? null]);
   assert.deepEqual(actions(menu), [['Show window', 'showWindow', null], ['Open log file', 'openLogFile', null], ['Start at login', 'autostart', null],
-    ['Help', 'showHelp', null], ['About browse-bridge…', 'showAbout', null], ['Quit', 'quit', null]]);
+    ['Help', 'showHelp', null], ['About browse-bridge…', 'showAbout', null], ['Copy diagnostics', 'copyDiagnostics', null], ['Quit', 'quit', null]]);
   assert.equal(menu.find((i) => i.action === 'autostart').checked, true);
 
   const [a, b] = [menu[2].submenu, menu[3].submenu];

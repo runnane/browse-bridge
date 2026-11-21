@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('bridge', {
   // The General page (BBR-45): saveAppSettings({ pollSeconds }), and open config.json in the desktop's editor.
   saveAppSettings: invoke('saveAppSettings'),
   openConfigFile: invoke('openConfigFile'),
+  // Copy the diagnostics bundle (core/diagnostics.js) to the clipboard; the argument is "hide host names". Resolves to its line count.
+  copyDiagnostics: invoke('copyDiagnostics'),
   copy: invoke('copy'),
   openLogFile: invoke('openLogFile'),
   autostart: invoke('autostart'),
