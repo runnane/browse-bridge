@@ -41,14 +41,31 @@ the link (which browse itself does not encrypt) rides inside SSH.
   needs neither npm nor Node; npm is used only on a non-Linux remote. It turns auto-update **off** persistently,
   binds the relay to `127.0.0.1`, restarts it — then **verifies at the remote**
   (version, `autoUpdate.effective`, and that the relay port listens on loopback
-  only). Any mismatch shows as a problem, never as success.
+  only). Any mismatch shows as a problem, never as success. A host that was
+  upgraded on its own (below) gets its own version instead of the pin.
+- **A newer browse, one host at a time:** at start-up and once a day (with
+  **Check for updates** on in General), and on **Check Now** on the Status
+  tab, the app reads the newest stable `@opencode/browse` from the npm registry
+  and says whether this release was tested with it ("browse 0.1.6 available
+  (not yet tested with this app)"). **Upgrade browse** on a host's Status tab
+  runs the same setup with that version on that host only, then verifies there:
+  the version, auto-update off, loopback only, and a status poll that shows the
+  browser reconnecting (when one was connected before). **Roll back browse**
+  puts the host back on the pin the same way. Every result is written to the
+  host's log, and a failed one stays a warning on the host. Nothing upgrades on
+  its own: there is no auto-upgrade switch.
 - **Several hosts at once:** the window's **host list** (left) shows every
   configured host with its state, ssh destination and pairing address. Select
   one and the toolbar, Status, Traffic, Log and Settings act on that host only.
   **Add Host…** gives a new host the next free loopback address (or the one you type),
   **Remove Host…** (in Settings) disconnects and drops one, and a refused
   setting (an address another host uses, a duplicate id, a bad ssh destination) is
-  shown next to the field it is about.
+  shown next to the field it is about. A host's relay port and remote browse
+  path are under **Advanced** in its Settings, collapsed by default.
+- **General:** below the host list, the settings for the whole app. These are
+  start at login, the status poll interval and the pinned browse version, shown
+  read-only (one host can run another version through **Upgrade browse**, above).
+  **Open Config File** opens `config.json` for anything else.
 - **Pair browser:** asks the selected host's relay for a one-time code and
   shows it with **that host's** address to enter (`localhost:19988` for the
   first host, `127.0.0.2:19988` for the second, …). Codes never reach the log.
@@ -89,7 +106,7 @@ the link (which browse itself does not encrypt) rides inside SSH.
   log file, Start at login, Help, About browse-bridge… and Quit stay top level. Every control is in the
   menu (Linux tray clicks are unreliable). Desktop notification, naming the
   host, when a host connects or disconnects. Optional start at login (XDG
-  autostart, which Plasma reads).
+  autostart, which Plasma reads), in the tray menu and on the General page.
 
 - **Help and About:** **Help** (toolbar, tray, or <kbd>F1</kbd>) explains first
   run, several hosts, every state and the shortcuts. **About** shows the running
@@ -116,6 +133,20 @@ page). It prints the `chown`/`chmod` that keeps the sandbox, if you prefer.
 On pnpm 10 the install skips Electron's download; `bin/browse-bridge`
 fetches it on first launch (one-off, ~100 MB).
 
+### Updating
+
+With **Check for updates** on (General; the default), the app fetches the
+checkout's default branch at start-up and once a day, with no prompt (ssh
+`BatchMode=yes`), and shows **Update available: N commits** in the status bar,
+the tray and About. Nothing is installed until you click
+**Update and Restart** in About: it fast-forwards the checkout (`git merge --ff-only`), runs
+`npm install` or `pnpm install` (whichever installed `node_modules`) only when
+`package.json` or a lockfile changed, then stops every host and restarts. It
+refuses, changing nothing, when a tracked file has local changes, the checkout
+is not on the default branch, or it has commits of its own. A failed fetch
+reads "Could not check for updates", never "up to date". By hand, the same is
+`git pull --ff-only`, then the install if the lockfile changed, then a restart.
+
 ## First run
 
 Use the **plain** host (e.g. `jon@dev004`), not an alias that carries a
@@ -123,8 +154,11 @@ Use the **plain** host (e.g. `jon@dev004`), not an alias that carries a
 `localhost:19988` and reports that address "in use" otherwise.
 
 1. In the window, set **SSH host** (`jon@dev004` or an `~/.ssh/config` alias)
-   on the Settings tab and **Apply**. For another host, use **Add Host…**
-   under the host list.
+   on the Settings tab and **Apply**. The field suggests the aliases in your
+   `~/.ssh/config` and warns about one with a `LocalForward`; **Test
+   Connection** tries the login and the remote browse before anything is
+   saved, and says what to do when ssh refuses. For another host, use
+   **Add Host…** under the host list.
 2. **Set Up Host** → expect "Host verified".
 3. Install the **OpenCode Browse** extension in Edge/Chrome (Chrome Web Store; in Edge
    allow extensions from other stores).
@@ -139,7 +173,7 @@ Agents on the remote use it through the `browse` MCP server
 
 ## Config
 
-`~/.config/browse-bridge/config.json` (written by the Settings form) holds a
+`~/.config/browse-bridge/config.json` (written by the Settings form and the General page) holds a
 **list of hosts**, each bridged on its own at the same time, plus two app-wide
 settings:
 
@@ -162,26 +196,44 @@ value), the app keeps it: it copies the file to
 menu, and saves nothing over it. Fix the file and click **Reload**, or click
 **Start Over** to replace it with one empty host.
 
-App-wide:
+The *in the window* column says where each key is edited. A key marked
+*file only* is changed by editing config.json: **Open Config File** on the
+General page opens it.
 
-| key | default | meaning |
-| --- | --- | --- |
-| `browseVersion` | 0.1.4 | pinned version setup installs and checks |
-| `pollSeconds` | 10 | status poll interval |
+App-wide (the **General** page, below the host list):
+
+| key | default | in the window | meaning |
+| --- | --- | --- | --- |
+| `browseVersion` | 0.1.4 | General, read-only | pinned version setup installs and checks on every host without its own |
+| `pollSeconds` | 10 | General | status poll interval in seconds (2 to 3600 in the window); a change reconnects no host |
+| `checkUpdates` | true | General | check daily whether origin has a newer browse-bridge (see Updating) and whether the npm registry has a newer browse; saves on tick, reconnects no host |
+
+Start at login is on the General page too. It is not a config key: it is the
+XDG autostart entry, and it saves as soon as you tick it.
+
+**Show in application menu** (General, source installs only) writes
+`$XDG_DATA_HOME/applications/browse-bridge.desktop` (`~/.local/share/applications/`
+when unset) and installs an icon under `icons/hicolor/`, so KRunner, the
+launcher or GNOME's overview can start browse-bridge without a terminal. Unlike
+the login entry it does not pass `--hidden`: the window opens. Unticking removes
+both. It is hidden in a packaged build, which ships its own entry.
 
 Per host (each entry in `hosts`):
 
-| key | default | meaning |
-| --- | --- | --- |
-| `id` | `host-1`, `host-2`, … | lower-case id; tags that host's log lines |
-| `name` | — | display name |
-| `host` | — | ssh destination |
-| `localAddress` | 127.0.0.1, 127.0.0.2, … | the extension pairs with `<localAddress>:<relay port>` (127.0.0.1 shows as `localhost`) |
-| `innerPort` | 19989, 19991, … | ssh's forward port on 127.0.0.1 (internal) |
-| `remotePort` | 19988 | relay port until status reports the real one |
-| `remoteBrowse` | `$HOME/.local/bin/browse` | browse on the remote |
-| `autoConnect` | true | connect when the app starts |
-| `sshOptions` | `[]` | extra `-o Key=value` options |
+| key | default | in the window | meaning |
+| --- | --- | --- | --- |
+| `id` | `host-1`, `host-2`, … | Settings, on Add Host only | lower-case id; tags that host's log lines |
+| `name` | — | Settings | display name |
+| `host` | — | Settings | ssh destination |
+| `localAddress` | 127.0.0.1, 127.0.0.2, … | Settings | the extension pairs with `<localAddress>:<relay port>` (127.0.0.1 shows as `localhost`) |
+| `innerPort` | 19989, 19991, … | file only | ssh's forward port on 127.0.0.1 (internal) |
+| `remotePort` | 19988 | Settings → Advanced | relay port until status reports the real one |
+| `remoteBrowse` | `$HOME/.local/bin/browse` | Settings → Advanced | browse on the remote. Set Up Host installs browse only at the default path; anywhere else it must already be the pinned version |
+| `transport` | `ssh` | Settings → Advanced, read-only | `ssh`, or `local` to run browse on this machine (tests) |
+| `autoConnect` | true | Settings | connect when the app starts |
+| `countActions` | false | Settings | count the commands the relay sends the browser (see above) |
+| `sshOptions` | `[]` | Settings | extra `-o Key=value` options |
+| `browseVersion` | — (the pin) | Status, **Upgrade browse** / **Roll back browse** | this host's own browse version, a stable `x.y.z`; set by Upgrade, removed by Roll back. Set Up Host and the version warning use it instead of the pin. A change reconnects no host |
 
 **Why an address per host, not a port per host:** the browse extension binds
 its pairing proof to the port it dials, and the relay checks it against its own
@@ -262,8 +314,12 @@ Run …"* with an update command (for an npm install, `npm install -g
 @opencode/browse@latest`). **Ignore it.** Running that command on a host
 replaces the pinned version with whatever is newest, which is exactly what the
 pin exists to prevent; the app will then warn that the running version is not
-the pinned one, and Set Up Host puts the pin back. Upgrade browse by updating
-browse-bridge, which moves the pin once a version is tested. *Evidence:* the
+the pinned one, and Set Up Host puts the pin back. To try a newer browse, use
+**Upgrade browse** on one host's Status tab: it installs the version the app's
+registry check found on that host only and verifies it there, and **Roll back
+browse** returns it to the pin. Updating browse-bridge moves the pin for every
+host once a version is tested (`TESTED_BROWSE_VERSIONS` beside the pin in
+`src/core/config.js`). *Evidence:* the
 notice and its command are read from upstream's source; the live wording and
 where it appears are not yet measured (BBR-51).
 

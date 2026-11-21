@@ -49,11 +49,13 @@ export function trayTooltip(agg, { version = '', configFailure = null } = {}) {
  * retry, and the menu would be rebuilt (under the cursor) each time. The
  * window shows traffic.
  */
-export function trayMenuModel(agg, { autostart = false, version = '', configFailure = null } = {}) {
+export function trayMenuModel(agg, { autostart = false, version = '', configFailure = null, update = null } = {}) {
   return [
     { label: `browse-bridge: ${agg.label}`, enabled: false },
     // The config file did not load (BBR-36): the window has the details and the Reload / Start over choice.
     ...(configFailure ? [{ label: configFailureLine(configFailure), action: 'showWindow' }] : []),
+    // A newer browse-bridge on origin (BBR-43): opens About, where the update is one click. No timestamp, so the menu is not rebuilt each check.
+    ...(update ? [{ label: update, action: 'showAbout' }] : []),
     { type: 'separator' },
     ...agg.hosts.map(hostSubmenu),
     { type: 'separator' },
@@ -64,6 +66,8 @@ export function trayMenuModel(agg, { autostart = false, version = '', configFail
     // Both open a dialog in the window (BBR-32).
     { label: 'Help', action: 'showHelp' },
     { label: 'About browse-bridge…', action: 'showAbout' },
+    // Puts a bug-report bundle on the clipboard, always with host names hidden (BBR-47).
+    { label: 'Copy diagnostics', action: 'copyDiagnostics' },
     { type: 'separator' },
     ...(version ? [{ label: version, enabled: false }] : []),
     { label: 'Quit', action: 'quit' },
@@ -78,6 +82,8 @@ function hostSubmenu(h) {
     label: `${hostTitle(h)}: ${hostStateText(h)}`,
     submenu: [
       { label: h.host || 'no ssh host', enabled: false },
+      // What to do about an ssh failure (BBR-46). Its text holds no countdown, so the menu is not rebuilt each retry.
+      ...(h.problem ? [{ label: problemLine(h.problem), enabled: false }] : []),
       ...(h.warnings ?? []).map((w) => ({ label: `⚠ ${w}`, enabled: false })),
       { type: 'separator' },
       h.connected
@@ -101,12 +107,21 @@ export function configFailureLine(failure, max = 120) {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
-/** Everything the tray displays for one aggregate snapshot (HostManager.snapshot()), plus ConfigStore's failure if any. */
-export function trayView(agg, { autostart = false, version = '', configFailure = null } = {}) {
+/** A host's classified ssh failure (snapshot `problem`) as one menu line, cut to a length a menu shows. */
+export function problemLine(problem, max = 160) {
+  const line = `✕ ${String(problem.text).replace(/\s+/g, ' ')}`;
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+/**
+ * Everything the tray displays for one aggregate snapshot (HostManager.snapshot()), plus ConfigStore's failure if any
+ * and the updater's one notice line (core/updater.js updateSummary's `line`), if any.
+ */
+export function trayView(agg, { autostart = false, version = '', configFailure = null, update = null } = {}) {
   return {
     icon: agg.overall,
     tooltip: trayTooltip(agg, { version, configFailure }),
-    menu: trayMenuModel(agg, { autostart, version, configFailure }),
+    menu: trayMenuModel(agg, { autostart, version, configFailure, update }),
   };
 }
 

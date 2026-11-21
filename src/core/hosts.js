@@ -1,5 +1,14 @@
 import { EventEmitter } from 'node:events';
-import { hostConfig, normalizeAppConfig, withHostAdded, withHostEdits, withHostRemoved } from './config.js';
+import { hostConfig, normalizeAppConfig, withAppEdits, withHostAdded, withHostBrowseVersion, withHostEdits, withHostRemoved } from './config.js';
+
+/**
+ * What a controller is rebuilt for: its effective config without the poll
+ * interval, which it reads at each poll, and without the browse versions
+ * (BBR-41), which only setup and the warnings read: an Upgrade must not drop
+ * the tunnel it is about to verify through.
+ */
+const restartKey = (cfg) => JSON.stringify({ ...cfg, pollSeconds: undefined, browseVersion: undefined, pinnedBrowseVersion: undefined });
+const versionKey = (cfg) => `${cfg.browseVersion} ${cfg.pinnedBrowseVersion}`;
 import { Controller } from './controller.js';
 
 /**
@@ -56,6 +65,9 @@ export function runHostAction(manager, action, id) {
   return fn(manager.controller(id));
 }
 
+/** Kicks closer together than this are one event: resume and unlock-screen often fire together (BBR-38). */
+export const KICK_DEBOUNCE_MS = 5000;
+
 /**
  * Owns one Controller per configured host. UI-agnostic like Controller:
  * `apply(config)` brings the set of controllers in line with a config, and
@@ -63,8 +75,11 @@ export function runHostAction(manager, action, id) {
  * `id` naming the host.
  */
 export class HostManager extends EventEmitter {
-  constructor({ logger, controlDir = null, localEnv = process.env, spawnImpl, createController } = {}) {
+  constructor({ logger, controlDir = null, localEnv = process.env, spawnImpl, createController, now = Date.now } = {}) {
     super();
+    this.now = now;
+    /** When the last kick acted (ms, from `now`), or null. */
+    this.lastKickAt = null;
     this.logger = logger;
     this.controlDir = controlDir;
     this.localEnv = localEnv;
@@ -107,8 +122,24 @@ export class HostManager extends EventEmitter {
     const clean = normalizeAppConfig(config);
     const next = new Map(clean.hosts.map((h) => [h.id, hostConfig(clean, h.id)]));
     const removed = [...this.entries.keys()].filter((id) => !next.has(id));
-    const changed = [...next.keys()].filter((id) => this.entries.has(id) && this.entries.get(id).key !== JSON.stringify(next.get(id)));
+    const changed = [...next.keys()].filter((id) => this.entries.has(id) && this.entries.get(id).key !== restartKey(next.get(id)));
     const added = [...next.keys()].filter((id) => !this.entries.has(id));
+    // A host that differs only in the poll interval keeps its controller and tunnel. Its pending poll
+    // timer is re-armed, so a shorter interval applies now, not after the old one runs out.
+    // One that differs only in its browse version (BBR-41) keeps them too; its warnings are recomputed.
+    for (const [id, cfg] of next) {
+      const entry = this.entries.get(id);
+      if (!entry || changed.includes(id)) continue;
+      const pollChanged = entry.ctl.cfg.pollSeconds !== cfg.pollSeconds;
+      const versionChanged = versionKey(entry.ctl.cfg) !== versionKey(cfg);
+      if (!pollChanged && !versionChanged) continue;
+      entry.ctl.cfg = cfg;
+      if (pollChanged) entry.ctl.schedulePoll();
+      if (versionChanged) {
+        entry.ctl.refreshWarnings();
+        entry.ctl.changed();
+      }
+    }
 
     const wasWanted = new Map();
     for (const id of [...removed, ...changed]) {
@@ -131,7 +162,7 @@ export class HostManager extends EventEmitter {
         spawnImpl: this.spawnImpl,
       });
       ctl.on('change', (snap) => this.emit('change', snap));
-      this.entries.set(id, { ctl, key: JSON.stringify(cfg) });
+      this.entries.set(id, { ctl, key: restartKey(cfg) });
       this.logger.info('config', `host ${id} ${changed.includes(id) ? 'reconfigured' : 'added'}`);
       if (ctl.configured && (wasWanted.get(id) || cfg.autoConnect)) toConnect.push(ctl);
       ctl.changed();
@@ -166,6 +197,37 @@ export class HostManager extends EventEmitter {
     return hostConfig(clean, clean.hosts.at(-1).id);
   }
 
+  /**
+   * Replace app-wide settings (from the window's General page), persist with
+   * `save` and apply. Only APP_EDITABLE_KEYS are taken. A new poll interval
+   * restarts no tunnel, and neither does checkUpdates (BBR-43), which no host
+   * carries. Returns { pollSeconds, browseVersion, checkUpdates }.
+   */
+  async editApp(fields, save = normalizeAppConfig) {
+    await this.queue;
+    const clean = save(withAppEdits(this.config, fields));
+    await this.apply(clean);
+    return { pollSeconds: clean.pollSeconds, browseVersion: clean.browseVersion, checkUpdates: clean.checkUpdates };
+  }
+
+  /**
+   * Upgrade browse on host `id` to `version`, or Roll back (`version` null) to
+   * the app's pin (BBR-41). The host's browse version is saved first, so Set Up
+   * Host, the warnings and a retry all aim at the version chosen, and an
+   * unreadable config refuses before the remote is touched. Then setup runs
+   * with it and verifies at the receiver (Controller.changeBrowse). A busy host
+   * is refused before anything is saved. The tunnel is not restarted.
+   * Resolves with changeBrowse's result.
+   */
+  async changeBrowse(id, version, save = normalizeAppConfig) {
+    await this.queue;
+    const ctl = this.controller(id);
+    if (ctl.busy) throw new Error(`busy: ${ctl.busy}`);
+    const clean = save(withHostBrowseVersion(this.config, id, version));
+    await this.apply(clean);
+    return this.controller(id).changeBrowse(version ? 'upgrade' : 'rollback');
+  }
+
   /** Remove one host: its controller is disconnected and dropped. The last host is refused. */
   async removeHost(id, save = normalizeAppConfig) {
     await this.queue;
@@ -194,6 +256,28 @@ export class HostManager extends EventEmitter {
     const hosts = this.ids().map((id) => this.get(id)).filter(Boolean).map((ctl) => ctl.snapshot());
     const overall = aggregateState(hosts);
     return { overall, label: AGGREGATE[overall], hosts };
+  }
+
+  /**
+   * Reconnect every wanted host now (BBR-38), after a resume or unlock: each
+   * one's forward restarts with its backoff reset and a poll runs. A host the
+   * user stopped is left alone. A kick within KICK_DEBOUNCE_MS of the last one
+   * that acted is skipped, so a resume and an unlock together restart each
+   * host once. Returns the ids kicked, or null when skipped.
+   */
+  kick(reason) {
+    const at = this.now();
+    if (this.lastKickAt !== null && at - this.lastKickAt < KICK_DEBOUNCE_MS) {
+      this.logger.info('power', `${reason}: reconnected ${Math.round((at - this.lastKickAt) / 1000)}s ago; skipped`);
+      return null;
+    }
+    this.lastKickAt = at;
+    const wanted = this.ids().filter((id) => this.get(id)?.wanted);
+    this.logger.info('power', `${reason}: reconnecting ${wanted.length ? wanted.join(', ') : 'no host (none connected)'}`);
+    for (const id of wanted) {
+      this.get(id).kick().catch((err) => this.logger.error('power', `host ${id}: reconnect failed: ${err.message}`));
+    }
+    return wanted;
   }
 
   /** Disconnect every host (on quit). The controllers stay, so apply() can reconnect them. */

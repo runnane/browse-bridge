@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hostConfig, loadConfig, normalizeAppConfig, pairingAddress, saveConfig, suggestHostId } from '../src/core/config.js';
+import { PINNED_BROWSE_VERSION, hostConfig, loadConfig, normalizeAppConfig, pairingAddress, saveConfig, suggestHostId } from '../src/core/config.js';
 import { Logger } from '../src/core/log.js';
 import { probePort } from '../src/core/proxy.js';
 import { HOST_ACTIONS, HostManager, aggregateState, runHostAction } from '../src/core/hosts.js';
@@ -261,6 +261,12 @@ test('hosts: one host\'s tunnel failing leaves the other host\'s bridge untouche
   t.after(() => mgr.stopAll());
   const sshHost = { id: 'a', host: 'dev004', localAddress: '127.0.0.4', innerPort: p[1], remotePort: p[2], autoConnect: true };
   await mgr.apply({ pollSeconds: 60, hosts: [sshHost, localHost('b', p.slice(3, 6))] });
+  // Never a real ssh (BBR-59): connect() armed a poll at 0 ms, which the tick below fires and which
+  // would run `ssh dev004 browse status`. Stub each controller's poll before any tick.
+  const polled = [];
+  for (const id of mgr.ids()) {
+    mgr.get(id).pollNow = async () => { polled.push(id); };
+  }
   assert.equal(children.length, 1, 'only host a has an ssh tunnel');
   assert.equal(children[0].args.at(-1), 'dev004');
   const b = mgr.get('b');
@@ -268,12 +274,14 @@ test('hosts: one host\'s tunnel failing leaves the other host\'s bridge untouche
   const bBefore = b.snapshot();
   assert.deepEqual([bBefore.overall === 'error', bBefore.connected, bBefore.tunnel.state], [false, true, 'up']);
 
-  children[0].stderr.emit('data', 'Connection refused\n');
+  children[0].stderr.emit('data', 'ssh: connect to host dev004 port 22: Connection refused\n');
   children[0].emit('exit', 255, null);
   const a = mgr.snapshot().hosts[0];
   assert.equal(a.tunnel.state, 'retrying');
   assert.equal(a.overall, 'error');
-  assert.match(a.tunnel.detail, /exit 255: Connection refused/);
+  assert.match(a.tunnel.detail, /exit 255: dev004 refused the connection on port 22/);
+  assert.equal(a.problem?.kind, 'refused', 'the host\'s snapshot carries the guidance for the message bar and tray');
+  assert.equal(mgr.snapshot().hosts[1].problem, null, 'the other host carries none');
 
   const check = async () => {
     assert.equal(mgr.get('b'), b, 'b is the same controller');
@@ -287,7 +295,68 @@ test('hosts: one host\'s tunnel failing leaves the other host\'s bridge untouche
 
   t.mock.timers.tick(1000);
   assert.equal(children.length, 2, 'a retries on its own backoff');
+  assert.ok(polled.includes('a'), 'the connect-time poll of the ssh host reached the stub, not a real ssh');
   await check();
+});
+
+test('hosts: kick reconnects every wanted host at once, leaves a stopped one alone, and debounces (BBR-38)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const p = await freePorts(6);
+  const { children, spawnImpl } = fakeSpawner();
+  let clock = 1_000_000;
+  const logger = new Logger();
+  const mgr = new HostManager({ logger, localEnv: { PATH: '/usr/bin:/bin', HOME: tmpdir() }, spawnImpl, now: () => clock });
+  t.after(() => mgr.stopAll());
+  const ssh = (id, addr, [inner, remote]) => ({ id, host: `dev-${id}`, localAddress: addr, innerPort: inner, remotePort: remote, autoConnect: true });
+  await mgr.apply({
+    pollSeconds: 60,
+    hosts: [ssh('a', '127.0.0.4', p.slice(0, 2)), localHost('b', p.slice(2, 4)), ssh('c', '127.0.0.5', p.slice(4, 6))],
+  });
+  // Never a real ssh: from here on record each controller's master close and poll instead.
+  // (connect() armed a poll at 0 ms; the ticks below would fire it.)
+  const events = [];
+  for (const id of mgr.ids()) {
+    const ctl = mgr.get(id);
+    ctl.transport = () => ({ closeMaster: async () => { events.push(`close ${id}`); } });
+    ctl.pollNow = async () => { events.push(`poll ${id}`); };
+  }
+  const flush = () => new Promise((r) => setImmediate(r));
+  const forHost = (id) => children.filter((c) => c.args.at(-1) === `dev-${id}`);
+  assert.deepEqual([forHost('a').length, forHost('c').length], [1, 1]);
+  await mgr.get('c').disconnect();
+  assert.equal(mgr.get('c').wanted, false, 'c is stopped by the user');
+
+  // Host a's forward fails until it waits out the 30 s cap.
+  for (let n = 1; n <= 6; n++) {
+    forHost('a').at(-1).emit('exit', 255, null);
+    if (n < 6) t.mock.timers.tick(2 ** (n - 1) * 1000);
+  }
+  assert.match(mgr.get('a').tunnel.detail, /retry in 30s$/);
+  assert.equal(forHost('a').length, 6);
+  await flush();
+  events.length = 0; // the set-up's own poll and c's disconnect
+
+  assert.deepEqual(mgr.kick('resume'), ['a', 'b']);
+  assert.equal(forHost('a').length, 7, 'a respawns ssh at once');
+  assert.equal(mgr.get('a').tunnel.failures, 0, 'with its backoff reset');
+  assert.equal(forHost('c').length, 1, 'the stopped host is not restarted');
+  await flush();
+  assert.deepEqual(events, ['close a', 'close b', 'poll a', 'poll b'], 'each wanted host polls now, on a fresh status master');
+  assert.ok(logger.ring.some((e) => e.source === 'power' && e.message === 'resume: reconnecting a, b'), 'one line names the reason');
+  assert.equal(await mgr.get('c').kick(), false, 'a stopped controller refuses a kick of its own');
+  assert.equal(events.length, 4, 'and neither closes a master nor polls');
+
+  clock += 2000;
+  assert.equal(mgr.kick('unlock-screen'), null, 'a second kick 2 s later is skipped');
+  await flush();
+  assert.equal(forHost('a').length, 7, 'one restart per host, not two');
+  assert.equal(events.length, 4, 'and one poll');
+  assert.ok(logger.ring.some((e) => e.source === 'power' && /^unlock-screen: .*skipped$/.test(e.message)));
+
+  clock += 10_000;
+  assert.deepEqual(mgr.kick('resume'), ['a', 'b'], 'a kick after the debounce window acts again');
+  assert.equal(forHost('a').length, 8);
+  assert.equal(forHost('c').length, 1);
 });
 
 test('hosts: apply() with one host changed replaces only that one; a removed host is stopped', async (t) => {
@@ -366,6 +435,7 @@ function stubManager() {
       pair: call('pair', { code: 'ABCD-EF12', address: pairingAddress(config) }),
       startRelay: call('startRelay', true),
       relayLog: call('relayLog', `relay log of ${config.id}`),
+      schedulePoll: (...args) => { calls.push([config.id, 'schedulePoll', ...args]); },
       snapshot: () => ({ id: config.id, localPort: config.localPort, overall: 'stopped' }),
       changed: () => {},
     });
@@ -403,6 +473,57 @@ test('hosts: an added host that clashes is refused with the config\'s message; n
   await assert.rejects(mgr.addHost({ host: 'jon@z', innerPort: 19989 }, save), /127\.0\.0\.1:19989 is used twice/);
   assert.equal(existsSync(path), false, 'nothing written');
   assert.deepEqual(mgr.ids(), ['dev004']);
+});
+
+test('hosts: a new poll interval from General is saved and reaches every controller without restarting one (BBR-45)', async () => {
+  const { mgr, calls } = stubManager();
+  const path = join(mkdtempSync(join(tmpdir(), 'bb-app-')), 'config.json');
+  const save = (cfg) => saveConfig(path, cfg);
+  await mgr.apply({ hosts: [sshHost('dev004', '127.0.0.1', 19989), sshHost('dev005', '127.0.0.2', 19991)] });
+  const [a, b] = [mgr.get('dev004'), mgr.get('dev005')];
+  calls.length = 0;
+
+  // browseVersion is read-only in the window: an ipc caller cannot move the pin through editApp.
+  const res = await mgr.editApp({ pollSeconds: 30, browseVersion: '9.9.9', hosts: [] }, save);
+  assert.deepEqual(res, { pollSeconds: 30, browseVersion: PINNED_BROWSE_VERSION, checkUpdates: true });
+  const stored = JSON.parse(readFileSync(path, 'utf8'));
+  assert.equal(stored.pollSeconds, 30);
+  assert.equal('browseVersion' in stored, false, 'the pin is not written');
+  assert.deepEqual(stored.hosts.map((h) => h.id), ['dev004', 'dev005'], 'the hosts are kept');
+  assert.equal(mgr.get('dev004'), a, 'dev004 keeps its controller');
+  assert.equal(mgr.get('dev005'), b, 'dev005 keeps its controller');
+  // No disconnect or connect: only each pending poll is re-armed, so a shorter interval applies at once.
+  assert.deepEqual(calls, [['dev004', 'schedulePoll'], ['dev005', 'schedulePoll']], 'no tunnel was disconnected or reconnected');
+  assert.deepEqual([a.cfg.pollSeconds, b.cfg.pollSeconds], [30, 30], 'each controller polls at the new interval');
+  assert.equal(mgr.config.pollSeconds, 30);
+
+  // Any other change to a host still rebuilds it.
+  await mgr.editHost('dev005', { remotePort: 20088 }, save);
+  assert.notEqual(mgr.get('dev005'), b, 'a changed relay port rebuilds the controller');
+  assert.equal(mgr.get('dev005').cfg.pollSeconds, 30);
+});
+
+test('hosts: Check for updates from General is saved only when off, and restarts no host (BBR-43)', async () => {
+  const { mgr, calls } = stubManager();
+  const path = join(mkdtempSync(join(tmpdir(), 'bb-upd-')), 'config.json');
+  const save = (cfg) => saveConfig(path, cfg);
+  await mgr.apply({ hosts: [sshHost('dev004', '127.0.0.1', 19989), sshHost('dev005', '127.0.0.2', 19991)] });
+  const [a, b] = [mgr.get('dev004'), mgr.get('dev005')];
+  assert.equal(mgr.config.checkUpdates, true, 'on by default');
+  calls.length = 0;
+
+  const off = await mgr.editApp({ checkUpdates: false }, save);
+  assert.equal(off.checkUpdates, false);
+  assert.equal(mgr.config.checkUpdates, false);
+  assert.equal(JSON.parse(readFileSync(path, 'utf8')).checkUpdates, false, 'off is written');
+  assert.equal(mgr.get('dev004'), a, 'dev004 keeps its controller');
+  assert.equal(mgr.get('dev005'), b, 'dev005 keeps its controller');
+  assert.deepEqual(calls, [], 'no tunnel was disconnected, reconnected or re-polled');
+  assert.equal('checkUpdates' in a.cfg, false, 'a host config never carries the app-wide setting');
+
+  await mgr.editApp({ checkUpdates: true }, save);
+  assert.equal('checkUpdates' in JSON.parse(readFileSync(path, 'utf8')), false, 'the default is not written');
+  assert.deepEqual(calls, []);
 });
 
 test('hosts: removing a host stops only that host; the last host cannot be removed', async () => {

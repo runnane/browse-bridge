@@ -31,10 +31,26 @@ tar, gzip, coreutils, grep, sed, awk, openssl), all from the host, nothing from
 | --- | --- | --- | --- |
 | `test/integration.test.js` | a real browse relay, throwaway `HOME` | relay 39988, proxy 127.0.0.2:39988, inner 39991 | the pid `browse status` reports |
 | `test/ssh.test.js` | an unprivileged `sshd` + a relay, throwaway keys/`HOME` | sshd 39922, relay 39978, proxy 127.0.0.3:39978, forward 39981 | the sshd pid file and the relay's port owner |
-| `test/setup-script.test.js` | `SETUP_SCRIPT` under `bash -s` in a throwaway `HOME`, against a fake `curl` serving a locally made tarball; PATH is an allow-list of symlinked host tools plus fakes, never `/usr/bin`, so the real curl and npm cannot run | none | nothing to stop (the fake browse only prints); its `bb-setup-*` / `bb-piece-*` temp dirs stay in the OS tmpdir |
+| `test/sshtest-sshd.test.js` | an unprivileged `sshd`, throwaway keys/known_hosts/`HOME`, a stub `browse` script; needs no `BROWSE_BIN`, so it runs whenever `/usr/sbin/sshd` exists | sshd 39924 | the sshd pid file |
+| `test/setup-script.test.js` | `SETUP_SCRIPT` under `bash -s` in a throwaway `HOME`, against a fake `curl` serving a locally made tarball; PATH is an allow-list of symlinked host tools plus fakes, never `/usr/bin`, so the real curl and npm cannot run | none | nothing to stop (the fake browse only prints); its `bb-setup-*` / `bb-piece-*` temp dirs are removed after each test (BBR-61) |
 
 `node --test` runs files **in parallel**, so the two files' ports must never
 overlap. That happened once and made both tests fail on each other's relay.
+
+## The ssh guard (BBR-60)
+
+`npm test` and `npm run gates` set `BB_FORBID_SSH=1`. With it, `assertSshAllowed`
+in `src/core/exec.js` refuses (throws, prints `BB_FORBID_SSH: refusing to run ssh
+to "<dest>"`, and sets `process.exitCode = 1` so a caller that swallows the throw
+still fails its file) any `ssh`/`scp`/`sftp` whose destination, the argument
+after `--`, is not loopback (`127.x.y.z`, `localhost`, `::1`). It covers `run()`
+(so every transport call) and the tunnel's default spawner. The two private-sshd
+tests pass because they connect to 127.0.0.1, not because they are listed. Unset,
+nothing changes (`test/sshguard.test.js` pins both directions).
+
+If a test trips it, stub the transport (see how `test/hosts.test.js` stubs
+`pollNow`); do not exempt the test. A bare `node --test file` run does not set
+the variable: prefix it with `BB_FORBID_SSH=1`.
 
 If a run is killed, find leftovers by **port** (`ss -ltnp | grep ':399'`) and
 signal that pid. Never kill by name. A leaked ssh ControlMaster shows up as
@@ -49,7 +65,15 @@ signal that pid. Never kill by name. A leaked ssh ControlMaster shows up as
   the render. It writes `<prefix>-<tab>.png` and `<prefix>.json` (any console
   errors are listed there). With two or more hosts configured it also selects
   the second host and writes `<prefix>-host2.png`, `<prefix>-host2-log.png`
-  and `second` (that render's text) in the JSON. `BB_SMOKE_INVALID=1` submits
+  and `second` (that render's text) in the JSON. Then it opens **General**
+  (BBR-45) and writes `<prefix>-general.png`, with `general` in the JSON:
+  `shown`, `tabsHidden`, `text`, `pollSeconds` and `autostart` (`text` is
+  innerText, which leaves input values out, so the poll field's value is its
+  own key). Next it selects the first host's Settings, expands the
+  **Advanced** section and writes `<prefix>-advanced.png`, with `advanced`
+  in the JSON: `host`, `collapsedByDefault` (true unless something opened it
+  before the hook), `open`, `text`, `remotePort`, `remoteBrowse` and
+  `transport`. `BB_SMOKE_INVALID=1` submits
   an Add Host form whose id clashes with the first host's and records the
   inline error under `invalid`; the config refuses it before writing. Last,
   it opens the Help and About dialogs, writes `<prefix>-help.png` and

@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigStore, UNREADABLE_REFUSAL, normalizeAppConfig, pairingAddress } from '../src/core/config.js';
+import { ConfigStore, DEFAULTS, UNREADABLE_REFUSAL, normalizeAppConfig, pairingAddress } from '../src/core/config.js';
 import { Logger } from '../src/core/log.js';
 import {
-  AGENT_INSTALL_COMMAND, PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, hostRows, logForHost, logText,
-  pairingAddressOf, pairingView, parseHostForm, pickSelected, withHostSnapshot,
+  AGENT_INSTALL_COMMAND, DEFAULT_RELAY_PORT, DEFAULT_REMOTE_BROWSE, PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration,
+  appMenuView, generalView, updateView, hostRows, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, parsePort, pickSelected, transportText, withHostSnapshot,
+  aliasOptions, aliasWarning, parseTestForm, problemBar, testResultView,
+  browseView, UPGRADE_BROWSE_LABEL, ROLLBACK_BROWSE_LABEL,
 } from '../src/ui/viewmodel.js';
 
 // Two hosts as HostManager.snapshot() reports them: A on localhost:19988, B on 127.0.0.2:19988 (BBR-21).
@@ -171,6 +173,40 @@ test('viewmodel: the Add Host form leaves a blank address to the allocator and n
   assert.deepEqual(parseHostForm({ id: 'hijack', host: '', localAddress: '127.0.0.2' }).fields, { name: '', host: '', sshOptions: [], autoConnect: false, countActions: false, localAddress: '127.0.0.2' });
 });
 
+// ---------- BBR-46: ssh guidance, Test Connection, ~/.ssh/config aliases ----------
+
+test('viewmodel: a host\'s recognised ssh failure is a bad bar naming the host; none without one', () => {
+  const text = 'No usable key. Load it with ssh-add, or set IdentityFile in SSH options.';
+  assert.deepEqual(problemBar(hostSnap('dev004', '127.0.0.1', { name: 'build', problem: { kind: 'auth', text } })), { kind: 'bad', text: `build: ${text}` });
+  assert.equal(problemBar(hostSnap('dev004', '127.0.0.1', { problem: null })), null);
+  assert.equal(problemBar(hostSnap('dev004', '127.0.0.1')), null);
+});
+
+test('viewmodel: Test Connection needs a host, takes the options and a valid remote path, and sends nothing else', () => {
+  assert.deepEqual(parseTestForm({ host: ' jon@dev004 ', sshOptions: 'Port=2222, IdentityFile=/k', remoteBrowse: '' }), {
+    fields: { host: 'jon@dev004', sshOptions: ['Port=2222', 'IdentityFile=/k'] },
+  });
+  assert.deepEqual(parseTestForm({ host: 'h', sshOptions: '', remoteBrowse: '/opt/browse' }).fields, { host: 'h', sshOptions: [], remoteBrowse: '/opt/browse' });
+  assert.equal(parseTestForm({ host: '', sshOptions: '' }).field, 'host');
+  assert.equal(parseTestForm({ host: 'h', remoteBrowse: 'relative/browse' }).field, 'remoteBrowse');
+});
+
+test('viewmodel: a test result is one bar at its worst step\'s level, with every step\'s text', () => {
+  assert.deepEqual(testResultView({ ok: true, level: 'warn', steps: [{ text: 'Logged in to h.' }, { text: 'browse is not installed yet.' }] }),
+    { kind: 'warn', text: 'Logged in to h. browse is not installed yet.' });
+  assert.deepEqual(testResultView({ ok: false, level: 'bad', steps: [{ text: 'No usable key.' }] }), { kind: 'bad', text: 'No usable key.' });
+  assert.equal(testResultView(null), null);
+});
+
+test('viewmodel: aliases become suggestions; one with a LocalForward is labelled and warned about, any case', () => {
+  const aliases = [{ alias: 'dev004', localForward: false }, { alias: 'Tunnel', localForward: true }];
+  assert.deepEqual(aliasOptions(aliases), [{ value: 'dev004', label: '' }, { value: 'Tunnel', label: 'has a LocalForward: use the plain host instead' }]);
+  assert.equal(aliasWarning(aliases, 'dev004'), null);
+  assert.equal(aliasWarning(aliases, 'jon@elsewhere'), null);
+  assert.match(aliasWarning(aliases, ' tunnel '), /^Tunnel carries a LocalForward in ~\/\.ssh\/config\. .*use the plain user@host instead/);
+  assert.deepEqual(aliasOptions(undefined), []);
+});
+
 test('viewmodel: each config refusal is shown next to the field it is about; any other error still shows', () => {
   const refusal = (raw) => {
     try {
@@ -190,10 +226,127 @@ test('viewmodel: each config refusal is shown next to the field it is about; any
     [{ hosts: [{ id: 'a', remotePort: 5000, innerPort: 5000 }] }, 'localAddress'],
     [{ hosts: [{ id: 'a', innerPort: 20001 }, { id: 'b', innerPort: 20001 }] }, 'localAddress'],
     [{ hosts: [{ id: 'a', sshOptions: ['nonsense'] }] }, 'sshOptions'],
+    [{ hosts: [{ id: 'a', remotePort: 0 }] }, 'remotePort'],
+    [{ hosts: [{ id: 'a', remotePort: 'x' }] }, 'remotePort'],
+    [{ hosts: [{ id: 'a', innerPort: 70000 }] }, 'localAddress'],
     [{ hosts: [{ id: 'a', transport: 'telnet' }] }, null],
   ];
   assert.deepEqual(cases.map(([raw]) => errorField(refusal(raw))), cases.map(([, field]) => field));
   assert.equal(errorField('something unexpected'), null);
+});
+
+// ---------- Advanced host fields and General (BBR-45) ----------
+
+test('viewmodel: the Advanced defaults are config.js\'s', () => {
+  assert.equal(DEFAULT_RELAY_PORT, DEFAULTS.remotePort);
+  assert.equal(DEFAULT_REMOTE_BROWSE, DEFAULTS.remoteBrowse);
+});
+
+test('viewmodel: the Advanced relay port takes a whole port number and refuses anything else on its own field', () => {
+  const edit = (remotePort) => parseHostForm({ host: 'jon@dev004', remotePort });
+  assert.equal(edit('20088').fields.remotePort, 20088);
+  assert.equal(edit(' 1 ').fields.remotePort, 1);
+  assert.equal(edit('65535').fields.remotePort, 65535);
+  const refused = { error: 'Enter the relay port, a whole number from 1 to 65535 (19988 unless the remote moved it).', field: 'remotePort' };
+  for (const bad of ['0', '65536', '-1', '19988.5', '0x50', '1e3', 'abc', '', '   ']) assert.deepEqual(edit(bad), refused, `remotePort ${JSON.stringify(bad)}`);
+  // Adding: a blank port is left to the default; a bad one is still refused.
+  assert.equal('remotePort' in parseHostForm({ host: 'jon@x', remotePort: '' }, { adding: true }).fields, false);
+  assert.deepEqual(parseHostForm({ host: 'jon@x', remotePort: '0' }, { adding: true }), refused);
+  // A form that does not carry the field sends nothing for it.
+  assert.equal('remotePort' in parseHostForm({ host: 'jon@x' }).fields, false);
+  assert.equal(parsePort('08080'), 8080);
+  assert.equal(parsePort(null), null);
+});
+
+test('viewmodel: the Advanced remote browse path is absolute or under the remote home; blank is the default', () => {
+  const edit = (remoteBrowse) => parseHostForm({ host: 'jon@dev004', remoteBrowse });
+  assert.equal(edit(' /opt/browse/bin/browse ').fields.remoteBrowse, '/opt/browse/bin/browse');
+  assert.equal(edit('$HOME/bin/browse').fields.remoteBrowse, '$HOME/bin/browse');
+  assert.equal(edit('~/bin/browse').fields.remoteBrowse, '~/bin/browse');
+  assert.equal(edit('').fields.remoteBrowse, '$HOME/.local/bin/browse', 'blank on Edit goes back to the default');
+  assert.equal('remoteBrowse' in parseHostForm({ host: 'jon@x', remoteBrowse: ' ' }, { adding: true }).fields, false, 'blank on Add is left out');
+  const refused = { error: 'Enter the path of browse on the remote host: absolute, or starting with $HOME/ or ~/.', field: 'remoteBrowse' };
+  for (const bad of ['browse', 'bin/browse', '$HOME', '/opt/browse/', '-oProxyCommand=x', '/opt/br\nowse', '$HOMEX/browse']) {
+    assert.deepEqual(edit(bad), refused, `remoteBrowse ${JSON.stringify(bad)}`);
+  }
+});
+
+test('viewmodel: the host form never sends a transport, so Apply cannot flip a local host to ssh', () => {
+  assert.equal('transport' in parseHostForm({ host: 'jon@x', transport: 'ssh', remotePort: '19988', remoteBrowse: '' }).fields, false);
+  assert.equal(transportText('ssh'), 'ssh');
+  assert.equal(transportText('local'), 'local (browse on this machine)');
+});
+
+test('viewmodel: General takes a poll interval of 2 to 3600 whole seconds and refuses anything else on its own field', () => {
+  assert.deepEqual(parseGeneralForm({ pollSeconds: '30' }), { fields: { pollSeconds: 30 } });
+  assert.deepEqual(parseGeneralForm({ pollSeconds: ' 2 ' }), { fields: { pollSeconds: 2 } });
+  assert.deepEqual(parseGeneralForm({ pollSeconds: '3600' }), { fields: { pollSeconds: 3600 } });
+  const refused = { error: 'Enter the poll interval in whole seconds, from 2 to 3600.', field: 'pollSeconds' };
+  for (const bad of ['1', '0', '3601', '', 'ten', '2.5', '-5', '1e2', '0x10', undefined]) {
+    assert.deepEqual(parseGeneralForm({ pollSeconds: bad }), refused, `pollSeconds ${JSON.stringify(bad)}`);
+  }
+  // Only the interval is sent: the pin is shown, never edited.
+  assert.deepEqual(Object.keys(parseGeneralForm({ pollSeconds: '10', browseVersion: '9.9.9' }).fields), ['pollSeconds']);
+});
+
+test('viewmodel: the General page shows the pin and the config path, and names the per-host upgrade controls (BBR-41)', () => {
+  assert.equal(generalView(null), null);
+  const v = generalView({ pollSeconds: 10, browseVersion: '0.1.4', configPath: '/cfg/config.json' });
+  assert.deepEqual([v.pollSeconds, v.browseVersion, v.configPath], ['10', '0.1.4', '/cfg/config.json']);
+  assert.ok(v.pinNote.includes(`${UPGRADE_BROWSE_LABEL} on its Status tab, and ${ROLLBACK_BROWSE_LABEL} puts it back`), v.pinNote);
+  assert.doesNotMatch(v.pinNote, /not built yet/);
+});
+
+// ---------- the browse version per host (BBR-41) ----------
+
+const upstream = (latest, extra = {}) => ({ latest, detail: `browse ${latest} available (not yet tested with this app). This app pins 0.1.4.`, tested: ['0.1.4'], canCheck: true, ...extra });
+const withVersion = (browseVersion, extra = {}) => hostSnap('dev004', '127.0.0.1', { overall: 'ready', config: { browseVersion, pinnedBrowseVersion: '0.1.4' }, ...extra });
+
+test('viewmodel: a newer version is offered as Upgrade on that host, with whether it was tested', () => {
+  const v = browseView(withVersion('0.1.4'), upstream('0.1.6'));
+  assert.equal(v.version, '0.1.4, the app\'s pin');
+  assert.deepEqual(v.upgrade, { text: `${UPGRADE_BROWSE_LABEL} on dev004 to 0.1.6`, note: 'not yet tested with this app', enabled: true });
+  assert.equal(v.rollback, null, 'a host on the pin has nothing to roll back');
+  assert.equal(browseView(withVersion('0.1.4'), upstream('0.1.4', { tested: ['0.1.4'] })).upgrade, null, 'nothing newer, no button');
+  assert.equal(browseView(withVersion('0.1.4'), upstream('0.1.6', { tested: ['0.1.4', '0.1.6'] })).upgrade.note, 'tested with this app');
+  assert.equal(browseView(withVersion('0.1.4'), null).upgrade, null, 'before any check, no button');
+  assert.equal(browseView(withVersion('0.1.4', { busy: 'Pairing' }), upstream('0.1.6')).upgrade.enabled, false);
+  assert.equal(browseView(withVersion('0.1.4', { overall: 'unconfigured' }), upstream('0.1.6')).upgrade.enabled, false);
+});
+
+test('viewmodel: a host on its own version shows it as such and offers Roll back to the pin', () => {
+  const v = browseView(withVersion('0.1.6'), upstream('0.1.6'));
+  assert.equal(v.version, '0.1.6, set for this host (the app pins 0.1.4; not yet tested with this app)');
+  assert.equal(v.upgrade, null, 'it already runs the newest');
+  assert.deepEqual(v.rollback, { text: `${ROLLBACK_BROWSE_LABEL} to 0.1.4`, enabled: true });
+});
+
+test('viewmodel: the last Upgrade shows what failed, and a verified one says so', () => {
+  const failed = browseView(withVersion('0.1.6', { browseChange: { action: 'upgrade', version: '0.1.6', ok: false, problems: ['browse version is 0.1.4, expected 0.1.6'], notes: [] } }), upstream('0.1.6'));
+  assert.deepEqual(failed.result, { kind: 'bad', text: 'Upgrade to browse 0.1.6 did not verify: browse version is 0.1.4, expected 0.1.6.' });
+  const back = browseView(withVersion('0.1.4', { browseChange: { action: 'rollback', version: '0.1.4', ok: true, problems: [], notes: ['no browser was connected before, so its reconnect was not checked'] } }), null);
+  assert.deepEqual(back.result, { kind: 'ok', text: 'Roll back to browse 0.1.4 verified; no browser was connected before, so its reconnect was not checked.' });
+  assert.equal(browseView(withVersion('0.1.4'), null).result, null);
+});
+
+test('viewmodel: the update notice shows in the status bar only when there is one, and About\'s buttons follow it (BBR-43)', () => {
+  assert.equal(generalView({ pollSeconds: 10, browseVersion: '0.1.4', configPath: '/c', checkUpdates: false }).checkUpdates, false);
+  assert.equal(generalView({ pollSeconds: 10, browseVersion: '0.1.4', configPath: '/c' }).checkUpdates, true, 'on unless main says off');
+  assert.deepEqual(updateView(null), { bar: null, text: '', subjects: [], showUpdate: false, canUpdate: false, canCheck: false });
+  const available = updateView({ line: 'Update available: 2 commits', detail: 'Update available: 2 commits on origin/main.', subjects: ['a', 'b'], canUpdate: true, canCheck: true, busy: false });
+  assert.deepEqual(available, { bar: 'Update available: 2 commits', text: 'Update available: 2 commits on origin/main.', subjects: ['a', 'b'], showUpdate: true, canUpdate: true, canCheck: true });
+  const failed = updateView({ line: null, detail: 'Could not check for updates: git fetch failed: it timed out.', subjects: [], canUpdate: false, canCheck: true, busy: false });
+  assert.equal(failed.bar, null, 'nothing in the status bar');
+  assert.equal(failed.showUpdate, false);
+  const updating = updateView({ line: 'Updating browse-bridge…', detail: 'Updating browse-bridge…', subjects: [], canUpdate: false, canCheck: false, busy: true });
+  assert.deepEqual([updating.bar, updating.showUpdate, updating.canUpdate], ['Updating browse-bridge…', true, false], 'the button stays, disabled, while it runs');
+});
+
+test('viewmodel: the application-menu checkbox is hidden for a packaged build and follows the entry otherwise (BBR-48)', () => {
+  assert.deepEqual(appMenuView({ packaged: true, enabled: true }), { hidden: true, checked: false });
+  assert.deepEqual(appMenuView(null), { hidden: true, checked: false });
+  assert.deepEqual(appMenuView({ packaged: false, enabled: true }), { hidden: false, checked: true });
+  assert.deepEqual(appMenuView({ packaged: false, enabled: false }), { hidden: false, checked: false });
 });
 
 // ---------- formatting ----------

@@ -28,15 +28,50 @@ export function baseSshOptions(cfg) {
   ];
 }
 
+/** True for a destination that is this machine: 127.x.y.z, localhost or ::1, with an optional user@ and brackets. */
+export function isLoopbackDestination(dest) {
+  const host = String(dest ?? '').replace(/^.*@/, '').replace(/^\[(.*)\]$/, '$1').toLowerCase();
+  return host === 'localhost' || host === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/**
+ * Test guard (BBR-60). With BB_FORBID_SSH=1 (set by `npm test` / `npm run gates`) an
+ * ssh/scp/sftp whose destination is not loopback is refused, so a unit test can never
+ * reach a real host. The two private-sshd tests connect to 127.0.0.1 and pass by that,
+ * not by a list of files. With the variable unset this does nothing.
+ * Loud on purpose: it also fails the process, in case a caller swallows the throw.
+ */
+export function assertSshAllowed(cmd, args, penv = process.env) {
+  if (penv.BB_FORBID_SSH !== '1') return;
+  const name = String(cmd).split('/').pop();
+  if (name !== 'ssh' && name !== 'scp' && name !== 'sftp') return;
+  const list = (args ?? []).map(String);
+  const sep = list.indexOf('--');
+  const dest = sep >= 0 ? list[sep + 1] : undefined;
+  if (dest !== undefined && isLoopbackDestination(dest)) return;
+  const msg = `BB_FORBID_SSH: refusing to run ${name} to ${dest === undefined ? '(unknown destination)' : JSON.stringify(dest)} in a test; only a loopback destination is allowed. Stub the transport instead.`;
+  console.error(msg);
+  process.exitCode = 1;
+  throw new Error(msg);
+}
+
+/** `spawn` behind the test guard; the tunnel's default spawner. */
+export function guardedSpawn(cmd, args, opts) {
+  assertSshAllowed(cmd, args);
+  return spawn(cmd, args, opts);
+}
+
 /**
  * Run a child process and collect its output. Resolves (never rejects) with
  * { code, signal, stdout, stderr, timedOut } so callers handle every outcome.
+ * (The BB_FORBID_SSH guard is the one exception: it throws, and only in tests.)
  */
-export function run(cmd, args, { input = null, timeoutMs = 30_000, env = process.env } = {}) {
+export function run(cmd, args, { input = null, timeoutMs = 30_000, env = process.env, cwd = undefined } = {}) {
+  assertSshAllowed(cmd, args);
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(cmd, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawn(cmd, args, { env, cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (err) {
       resolve({ code: -1, signal: null, stdout: '', stderr: String(err), timedOut: false });
       return;
@@ -97,18 +132,17 @@ function controlOpts(controlDir) {
   ];
 }
 
+/** argv for `ssh <host> <command>`, where `command` is one remote shell string the caller has already quoted. */
+export function sshCommandArgs(cfg, command, controlDir = null) {
+  return [...baseSshOptions(cfg), ...controlOpts(controlDir), '--', cfg.host, command];
+}
+
 /** argv for `ssh <host> <browse> <args…>`: the remote command is one string, every part quoted. */
 export function sshBrowseArgs(cfg, args, controlDir = null) {
-  return [
-    ...baseSshOptions(cfg), ...controlOpts(controlDir), '--', cfg.host,
-    [shQuotePath(cfg.remoteBrowse), ...args.map(shQuote)].join(' '),
-  ];
+  return sshCommandArgs(cfg, [shQuotePath(cfg.remoteBrowse), ...args.map(shQuote)].join(' '), controlDir);
 }
 
 /** argv for `ssh <host> bash -s -- <args…>` with the script on stdin. */
 export function sshScriptArgs(cfg, args, controlDir = null) {
-  return [
-    ...baseSshOptions(cfg), ...controlOpts(controlDir), '--', cfg.host,
-    ['bash', '-s', '--', ...args.map(shQuote)].join(' '),
-  ];
+  return sshCommandArgs(cfg, ['bash', '-s', '--', ...args.map(shQuote)].join(' '), controlDir);
 }

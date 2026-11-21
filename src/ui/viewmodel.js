@@ -3,6 +3,8 @@
  * entries. No DOM and no Node imports, so the renderer loads it as an ES
  * module and test/viewmodel.test.js runs it without a display.
  */
+import { ROLLBACK_BROWSE_LABEL, UPGRADE_BROWSE_LABEL } from '../core/labels.js';
+import { compareVersions, testedText } from '../core/browseversion.js';
 
 /** Each state has a glyph and a word, so meaning never rides on colour alone. */
 export const GLYPH = Object.freeze({
@@ -57,7 +59,19 @@ export function pickSelected(hosts, selectedId) {
 }
 
 /** Shared with core (tray, controller) so a message and the control it names cannot drift; see core/labels.js. */
-export { SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME } from '../core/labels.js';
+export {
+  SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME, TEST_LABEL, SSH_OPTIONS_LABEL, CHECK_UPDATES_LABEL, UPDATE_LABEL, CHECK_NOW_LABEL,
+  UPGRADE_BROWSE_LABEL, ROLLBACK_BROWSE_LABEL,
+} from '../core/labels.js';
+
+/**
+ * The message bar for a host's recognised ssh failure (snapshot `problem`,
+ * from core/ssherror.js via the tunnel or a status poll), or null (BBR-46).
+ */
+export function problemBar(snap) {
+  if (!snap?.problem?.text) return null;
+  return { kind: 'bad', text: `${hostTitle(snap)}: ${snap.problem.text}` };
+}
 
 /**
  * A host config's pairing address, as config.js pairingAddress() gives it
@@ -205,8 +219,36 @@ export function actionsView(traffic) {
 // ---------- host form ----------
 
 /**
+ * config.js DEFAULTS.remotePort and .remoteBrowse (the renderer cannot import
+ * config.js; a test pins them together).
+ */
+export const DEFAULT_RELAY_PORT = 19988;
+export const DEFAULT_REMOTE_BROWSE = '$HOME/.local/bin/browse';
+
+/** A whole port number 1–65535 from a form value, else null. "0x50", "1e3" and "" are not ports. */
+export function parsePort(value) {
+  const s = String(value ?? '').trim();
+  if (!/^\d{1,5}$/.test(s)) return null;
+  const n = Number(s);
+  return n >= 1 && n <= 65535 ? n : null;
+}
+
+/**
+ * A remote browse path the form accepts: absolute, or under the remote home
+ * ($HOME/ or ~/), naming a file (not ending in /), on one line.
+ */
+export function isRemoteBrowsePath(p) {
+  const s = String(p);
+  return /^(\/|\$HOME\/|~\/)/.test(s) && !s.endsWith('/') && !/[\u0000-\u001f\u007f]/.test(s);
+}
+
+/**
  * The Settings form's fields → the host fields IPC sends. A blank local address
  * on Add means "next free" and is left out; on Edit it keeps the address.
+ * The Advanced fields (BBR-45): a blank remote browse path is the default
+ * one; a blank relay port is left to the default on Add and refused on Edit.
+ * A field the form does not carry (undefined) is not sent. Transport is never
+ * sent: the window shows it read-only, so Apply cannot flip a "local" host.
  * Returns { fields } or { error, field } for what can be told without the config.
  */
 export function parseHostForm(form, { adding = false } = {}) {
@@ -220,13 +262,172 @@ export function parseHostForm(form, { adding = false } = {}) {
     countActions: Boolean(form.countActions),
   };
   const addr = String(form.localAddress ?? '').trim();
-  // The port is never asked for: it must be the relay's own. The inner (ssh -L) port is allocated.
+  // The pairing port is never asked for: it must be the relay's own. The inner (ssh -L) port is allocated.
   if (addr) fields.localAddress = addr;
   if (adding) {
     const id = String(form.id ?? '').trim();
     if (id) fields.id = id;
   }
+  if (form.remoteBrowse !== undefined) {
+    const path = String(form.remoteBrowse).trim();
+    if (path && !isRemoteBrowsePath(path)) {
+      return { error: 'Enter the path of browse on the remote host: absolute, or starting with $HOME/ or ~/.', field: 'remoteBrowse' };
+    }
+    if (path) fields.remoteBrowse = path;
+    else if (!adding) fields.remoteBrowse = DEFAULT_REMOTE_BROWSE;
+  }
+  if (form.remotePort !== undefined) {
+    const raw = String(form.remotePort).trim();
+    if (raw || !adding) {
+      const port = parsePort(raw);
+      if (port === null) return { error: `Enter the relay port, a whole number from 1 to 65535 (${DEFAULT_RELAY_PORT} unless the remote moved it).`, field: 'remotePort' };
+      fields.remotePort = port;
+    }
+  }
   return { fields };
+}
+
+// ---------- Test Connection and the ~/.ssh/config aliases (BBR-46) ----------
+
+/**
+ * The host form's fields Test Connection needs ({ host, sshOptions,
+ * remoteBrowse }), checked as Add checks them: a host is required and the
+ * remote browse path must be one the form accepts. Returns { fields } or
+ * { error, field }.
+ */
+export function parseTestForm(form) {
+  const parsed = parseHostForm({ host: form.host, sshOptions: form.sshOptions, remoteBrowse: form.remoteBrowse }, { adding: true });
+  if (parsed.error) return parsed;
+  const { host, sshOptions, remoteBrowse } = parsed.fields;
+  return { fields: { host, sshOptions, ...(remoteBrowse ? { remoteBrowse } : {}) } };
+}
+
+/** core/sshtest.js's result as the form's in-place bar: { kind: ok|warn|bad, text }. */
+export function testResultView(result) {
+  if (!result) return null;
+  const text = (result.steps ?? []).map((s) => s.text).join(' ');
+  return { kind: result.level ?? (result.ok ? 'ok' : 'bad'), text: text || (result.ok ? 'Connected.' : 'The test failed.') };
+}
+
+/** The ~/.ssh/config aliases ([{ alias, localForward }], core/sshconfig.js) as the SSH host field's suggestions. */
+export function aliasOptions(aliases) {
+  return (aliases ?? []).map((a) => ({ value: a.alias, label: a.localForward ? 'has a LocalForward: use the plain host instead' : '' }));
+}
+
+/**
+ * The warning under the SSH host field when it names an alias that carries a
+ * LocalForward, else null. README First run says not to use one: the app
+ * forwards the relay itself, and the alias's own forward collides with it.
+ */
+export function aliasWarning(aliases, host) {
+  const h = String(host ?? '').trim();
+  const a = (aliases ?? []).find((x) => x.localForward && x.alias.toLowerCase() === h.toLowerCase());
+  if (!a) return null;
+  return `${a.alias} carries a LocalForward in ~/.ssh/config. The app forwards the relay itself and that forward collides with it: use the plain user@host instead, or an alias without a LocalForward.`;
+}
+
+/** How a host's transport reads in the Advanced section, which shows it and never edits it. */
+export function transportText(transport) {
+  return transport === 'local' ? 'local (browse on this machine)' : 'ssh';
+}
+
+// ---------- General (app-wide settings, BBR-45) ----------
+
+/** The poll interval the General page accepts, in whole seconds. config.js falls back to its default below 2. */
+export const POLL_SECONDS_MIN = 2;
+export const POLL_SECONDS_MAX = 3600;
+
+/**
+ * The General page's form → the app-wide fields IPC sends (only the editable
+ * ones: the browse pin is shown, never sent). Returns { fields } or { error, field }.
+ */
+export function parseGeneralForm(form) {
+  const s = String(form.pollSeconds ?? '').trim();
+  const n = /^\d+$/.test(s) ? Number(s) : NaN;
+  if (!(n >= POLL_SECONDS_MIN && n <= POLL_SECONDS_MAX)) {
+    return { error: `Enter the poll interval in whole seconds, from ${POLL_SECONDS_MIN} to ${POLL_SECONDS_MAX}.`, field: 'pollSeconds' };
+  }
+  return { fields: { pollSeconds: n } };
+}
+
+/**
+ * The General page's read-only lines from the state's `app` block
+ * ({ pollSeconds, browseVersion, configPath }): null until main has sent it.
+ */
+export function generalView(app) {
+  if (!app) return null;
+  return {
+    pollSeconds: String(app.pollSeconds),
+    checkUpdates: app.checkUpdates !== false,
+    browseVersion: app.browseVersion,
+    pinNote: `Set Up Host installs this version on each host and warns when a host runs another. A new browse-bridge release moves it. One host can try a newer browse first: ${UPGRADE_BROWSE_LABEL} on its Status tab, and ${ROLLBACK_BROWSE_LABEL} puts it back on this version.`,
+    configPath: app.configPath,
+  };
+}
+
+/**
+ * The update notice (BBR-43) from the state's `update` block (core/updater.js
+ * updateSummary): the status bar's button (hidden when `bar` is null), the
+ * About dialog's text and commit subjects, and which of its buttons show.
+ * Before main has sent it, nothing shows and nothing can be clicked.
+ */
+export function updateView(update) {
+  if (!update) return { bar: null, text: '', subjects: [], showUpdate: false, canUpdate: false, canCheck: false };
+  return {
+    bar: update.line ?? null,
+    text: update.detail ?? '',
+    subjects: Array.isArray(update.subjects) ? update.subjects : [],
+    showUpdate: Boolean(update.canUpdate) || (Boolean(update.busy) && update.line !== null),
+    canUpdate: Boolean(update.canUpdate),
+    canCheck: Boolean(update.canCheck),
+  };
+}
+
+/**
+ * The Status tab's browse block for one host (BBR-41), from its snapshot and
+ * the state's `browse` block (core/browseversion.js browseUpstreamSummary):
+ *   version   what this host is set to run: the app's pin, or its own version
+ *   upstream  what the registry check found ("browse 0.1.6 available (not yet tested with this app). …")
+ *   upgrade   { text, note, enabled } when a version newer than this host's is known, else null
+ *   rollback  { text, enabled } when the host runs its own version, else null
+ *   result    the last Upgrade or Roll back: { kind: ok|bad, text }, or null
+ * Nothing can be clicked while the host is busy or has no ssh host.
+ */
+export function browseView(snap, upstream) {
+  const cfg = snap?.config ?? {};
+  const version = cfg.browseVersion ?? null;
+  const pin = cfg.pinnedBrowseVersion ?? version;
+  const tested = upstream?.tested ?? [];
+  const own = Boolean(version && pin && version !== pin);
+  const idle = Boolean(snap) && snap.overall !== 'unconfigured' && !snap.busy;
+  const latest = upstream?.latest ?? null;
+  const upgradeTo = latest && compareVersions(latest, version) === 1 ? latest : null;
+  let result = null;
+  const c = snap?.browseChange;
+  if (c) {
+    const what = c.action === 'rollback' ? 'Roll back' : 'Upgrade';
+    result = c.ok
+      ? { kind: 'ok', text: `${what} to browse ${c.version} verified${c.notes?.length ? `; ${c.notes.join('; ')}` : ''}.` }
+      : { kind: 'bad', text: `${what} to browse ${c.version} did not verify: ${c.problems.join('; ')}.` };
+  }
+  return {
+    version: !version ? 'unknown' : own ? `${version}, set for this host (the app pins ${pin}; ${testedText(version, tested)})` : `${version}, the app's pin`,
+    upstream: upstream?.detail ?? '',
+    upgrade: upgradeTo ? { text: `${UPGRADE_BROWSE_LABEL} on ${hostTitle(snap)} to ${upgradeTo}`, note: testedText(upgradeTo, tested), enabled: idle } : null,
+    rollback: own ? { text: `${ROLLBACK_BROWSE_LABEL} to ${pin}`, enabled: idle } : null,
+    canCheck: Boolean(upstream?.canCheck),
+    result,
+  };
+}
+
+/**
+ * The "Show in application menu" checkbox from main's { packaged, enabled }.
+ * A packaged build ships its own menu entry, so the checkbox is hidden there
+ * (and before main has answered).
+ */
+export function appMenuView(info) {
+  if (!info || info.packaged) return { hidden: true, checked: false };
+  return { hidden: false, checked: Boolean(info.enabled) };
 }
 
 /**
@@ -240,6 +441,8 @@ export function errorField(message) {
   if (m.includes(UNREADABLE_REFUSAL_TEXT)) return null;
   if (/not a valid ssh destination/.test(m)) return 'host';
   if (/host id .* must be|two hosts have the id/.test(m)) return 'id';
+  // Before the localAddress rule: "remotePort must be a port number" is about the Advanced relay port field.
+  if (/remotePort must be/.test(m)) return 'remotePort';
   if (/is used twice|localAddress|innerPort|no free (local port|loopback address)|loopback address/.test(m)) return 'localAddress';
   if (/sshOptions/.test(m)) return 'sshOptions';
   return null;

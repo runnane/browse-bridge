@@ -5,14 +5,27 @@
 // script needs, plus fake `curl` (serves two local files by URL and logs every
 // request), `uname`, `ldd`, `ss` and optionally `npm`. /usr/bin is never on
 // that PATH, so the real curl and npm cannot be reached even by a test bug.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { INSTALL_FUNCS, SETUP_SCRIPT, parseSetupOutput, verifySetup } from '../src/core/browse.js';
+
+// Every temp root this file makes, removed once all its tests have run (BBR-61).
+// runSetup returns paths inside its root that the assertions read, so removal
+// waits for the end of the file rather than the end of runSetup.
+const roots = [];
+const tmpRoot = (prefix) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  roots.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+});
 
 const PIN = '0.1.4';
 const metaUrl = (target, pin = PIN) => `https://registry.npmjs.org/@opencode%2fbrowse-${target}/${pin}`;
@@ -122,7 +135,7 @@ chmod 755 "$HOME/.local/bin/browse"
  * with the script on stdin), in a throwaway HOME.
  */
 function runSetup({ os = 'Linux', arch = 'x86_64', libc = 'glibc', omit = [], npm = false, pin = PIN, browsePath = '$HOME/.local/bin/browse', meta, preinstall } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'bb-setup-'));
+  const root = tmpRoot('bb-setup-');
   const home = join(root, 'home');
   const tmp = join(root, 'tmp');
   mkdirSync(home);
@@ -171,7 +184,7 @@ test('setup script: SETUP_SCRIPT parses under bash, and INSTALL_FUNCS under sh (
 
 for (const shell of [SH, BASH]) {
   test(`setup pieces (${shell}): target from uname and ldd; no baseline, musl from ldd or alpine-release`, () => {
-    const root = mkdtempSync(join(tmpdir(), 'bb-piece-'));
+    const root = tmpRoot('bb-piece-');
     const cases = [
       [{ arch: 'x86_64' }, 0, 'linux-x64'],
       [{ arch: 'amd64' }, 0, 'linux-x64'],
@@ -196,7 +209,7 @@ for (const shell of [SH, BASH]) {
   });
 
   test(`setup pieces (${shell}): integrity decodes to the 128-hex SHA-512, via base64 or openssl; malformed is refused`, () => {
-    const root = mkdtempSync(join(tmpdir(), 'bb-piece-'));
+    const root = tmpRoot('bb-piece-');
     const digest = createHash('sha512').update('browse-bridge BBR-54').digest();
     const integrity = `sha512-${digest.toString('base64')}`;
     assert.equal(integrity.length, 7 + 88);
@@ -214,7 +227,7 @@ for (const shell of [SH, BASH]) {
   });
 
   test(`setup pieces (${shell}): only a registry.npmjs.org/@opencode/ tarball URL is accepted`, () => {
-    const bin = makeBin(mkdtempSync(join(tmpdir(), 'bb-piece-')));
+    const bin = makeBin(tmpRoot('bb-piece-'));
     assert.equal(piece(shell, bin, 'bb_tarball_ok', [tgzUrl('linux-x64')]).status, 0);
     for (const bad of [
       'http://registry.npmjs.org/@opencode/browse-linux-x64/-/browse-linux-x64-0.1.4.tgz',
@@ -231,7 +244,7 @@ for (const shell of [SH, BASH]) {
   });
 
   test(`setup pieces (${shell}): missing tools are named; sha512 and json helpers`, () => {
-    const root = mkdtempSync(join(tmpdir(), 'bb-piece-'));
+    const root = tmpRoot('bb-piece-');
     const full = makeBin(join(root, 'full'));
     assert.deepEqual(piece(shell, full, 'bb_need_tools'), { status: 0, out: '', err: '' });
     const noCurl = makeBin(join(root, 'nocurl'), { omit: ['curl', 'tar', 'gzip'] });

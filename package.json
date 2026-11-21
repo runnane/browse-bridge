@@ -11,9 +11,9 @@
   },
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/",
+    "test": "BB_FORBID_SSH=1 node --test test/",
     "check": "node scripts/check-syntax.js",
-    "gates": "node scripts/check-syntax.js && node --test test/"
+    "gates": "node scripts/check-syntax.js && BB_FORBID_SSH=1 node --test test/"
   },
   "devDependencies": {
     "electron": "45.3.4"

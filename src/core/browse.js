@@ -102,7 +102,7 @@ bb_json_str() {
  */
 export const SETUP_SCRIPT = String.raw`set -uo pipefail
 BROWSE="$1"; PIN="$2"; MARK='${MARK}'
-case "$BROWSE" in '$HOME/'*) BROWSE="$HOME/${'$'}{BROWSE#\$HOME/}";; esac
+case "$BROWSE" in '$HOME/'*) BROWSE="$HOME/${'$'}{BROWSE#\$HOME/}";; '~/'*) BROWSE="$HOME/${'$'}{BROWSE:2}";; esac
 step() { echo "$MARK step $1 $2"; }
 fail() { step install fail; echo "$1"; exit "$2"; }
 ${INSTALL_FUNCS}
