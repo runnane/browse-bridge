@@ -119,7 +119,10 @@ if [ "$have" != "$PIN" ]; then
     tmp=$(mktemp -d) || fail "mktemp -d failed" 4
     trap 'rm -rf "$tmp"' EXIT
     pkg="@opencode/browse-$target"
-    code=$(curl -sS --connect-timeout 15 --max-time 20 --retry 2 -o "$tmp/meta.json" -w '%{http_code}' "https://registry.npmjs.org/@opencode%2fbrowse-$target/$PIN" </dev/null)
+    code=$(curl -sS --connect-timeout 15 --max-time 20 --retry 2 -o "$tmp/meta.json" -w '%{http_code}' "https://registry.npmjs.org/@opencode%2fbrowse-$target/$PIN" </dev/null); crc=$?
+    case "$code" in
+      ''|000) fail "could not reach registry.npmjs.org from this host (curl exit $crc); check its DNS and outbound HTTPS" 4 ;;
+    esac
     [ "$code" = 200 ] || fail "registry answered HTTP $code for $pkg@$PIN" 4
     integrity=$(bb_json_str integrity "$tmp/meta.json") || fail "registry metadata for $pkg@$PIN has no single dist.integrity" 4
     tarball=$(bb_json_str tarball "$tmp/meta.json") || fail "registry metadata for $pkg@$PIN has no single dist.tarball" 4
