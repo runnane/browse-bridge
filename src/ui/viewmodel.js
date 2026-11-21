@@ -205,8 +205,36 @@ export function actionsView(traffic) {
 // ---------- host form ----------
 
 /**
+ * config.js DEFAULTS.remotePort and .remoteBrowse (the renderer cannot import
+ * config.js; a test pins them together).
+ */
+export const DEFAULT_RELAY_PORT = 19988;
+export const DEFAULT_REMOTE_BROWSE = '$HOME/.local/bin/browse';
+
+/** A whole port number 1–65535 from a form value, else null. "0x50", "1e3" and "" are not ports. */
+export function parsePort(value) {
+  const s = String(value ?? '').trim();
+  if (!/^\d{1,5}$/.test(s)) return null;
+  const n = Number(s);
+  return n >= 1 && n <= 65535 ? n : null;
+}
+
+/**
+ * A remote browse path the form accepts: absolute, or under the remote home
+ * ($HOME/ or ~/), naming a file (not ending in /), on one line.
+ */
+export function isRemoteBrowsePath(p) {
+  const s = String(p);
+  return /^(\/|\$HOME\/|~\/)/.test(s) && !s.endsWith('/') && !/[\u0000-\u001f\u007f]/.test(s);
+}
+
+/**
  * The Settings form's fields → the host fields IPC sends. A blank local address
  * on Add means "next free" and is left out; on Edit it keeps the address.
+ * The Advanced fields (BBR-45): a blank remote browse path is the default
+ * one; a blank relay port is left to the default on Add and refused on Edit.
+ * A field the form does not carry (undefined) is not sent. Transport is never
+ * sent: the window shows it read-only, so Apply cannot flip a "local" host.
  * Returns { fields } or { error, field } for what can be told without the config.
  */
 export function parseHostForm(form, { adding = false } = {}) {
@@ -220,13 +248,67 @@ export function parseHostForm(form, { adding = false } = {}) {
     countActions: Boolean(form.countActions),
   };
   const addr = String(form.localAddress ?? '').trim();
-  // The port is never asked for: it must be the relay's own. The inner (ssh -L) port is allocated.
+  // The pairing port is never asked for: it must be the relay's own. The inner (ssh -L) port is allocated.
   if (addr) fields.localAddress = addr;
   if (adding) {
     const id = String(form.id ?? '').trim();
     if (id) fields.id = id;
   }
+  if (form.remoteBrowse !== undefined) {
+    const path = String(form.remoteBrowse).trim();
+    if (path && !isRemoteBrowsePath(path)) {
+      return { error: 'Enter the path of browse on the remote host: absolute, or starting with $HOME/ or ~/.', field: 'remoteBrowse' };
+    }
+    if (path) fields.remoteBrowse = path;
+    else if (!adding) fields.remoteBrowse = DEFAULT_REMOTE_BROWSE;
+  }
+  if (form.remotePort !== undefined) {
+    const raw = String(form.remotePort).trim();
+    if (raw || !adding) {
+      const port = parsePort(raw);
+      if (port === null) return { error: `Enter the relay port, a whole number from 1 to 65535 (${DEFAULT_RELAY_PORT} unless the remote moved it).`, field: 'remotePort' };
+      fields.remotePort = port;
+    }
+  }
   return { fields };
+}
+
+/** How a host's transport reads in the Advanced section, which shows it and never edits it. */
+export function transportText(transport) {
+  return transport === 'local' ? 'local (browse on this machine)' : 'ssh';
+}
+
+// ---------- General (app-wide settings, BBR-45) ----------
+
+/** The poll interval the General page accepts, in whole seconds. config.js falls back to its default below 2. */
+export const POLL_SECONDS_MIN = 2;
+export const POLL_SECONDS_MAX = 3600;
+
+/**
+ * The General page's form → the app-wide fields IPC sends (only the editable
+ * ones: the browse pin is shown, never sent). Returns { fields } or { error, field }.
+ */
+export function parseGeneralForm(form) {
+  const s = String(form.pollSeconds ?? '').trim();
+  const n = /^\d+$/.test(s) ? Number(s) : NaN;
+  if (!(n >= POLL_SECONDS_MIN && n <= POLL_SECONDS_MAX)) {
+    return { error: `Enter the poll interval in whole seconds, from ${POLL_SECONDS_MIN} to ${POLL_SECONDS_MAX}.`, field: 'pollSeconds' };
+  }
+  return { fields: { pollSeconds: n } };
+}
+
+/**
+ * The General page's read-only lines from the state's `app` block
+ * ({ pollSeconds, browseVersion, configPath }): null until main has sent it.
+ */
+export function generalView(app) {
+  if (!app) return null;
+  return {
+    pollSeconds: String(app.pollSeconds),
+    browseVersion: app.browseVersion,
+    pinNote: 'Set Up Host installs this version on each host and warns when a host runs another. Changing it from here is not built yet (BBR-41); a new browse-bridge release moves it.',
+    configPath: app.configPath,
+  };
 }
 
 /**
@@ -240,6 +322,8 @@ export function errorField(message) {
   if (m.includes(UNREADABLE_REFUSAL_TEXT)) return null;
   if (/not a valid ssh destination/.test(m)) return 'host';
   if (/host id .* must be|two hosts have the id/.test(m)) return 'id';
+  // Before the localAddress rule: "remotePort must be a port number" is about the Advanced relay port field.
+  if (/remotePort must be/.test(m)) return 'remotePort';
   if (/is used twice|localAddress|innerPort|no free (local port|loopback address)|loopback address/.test(m)) return 'localAddress';
   if (/sshOptions/.test(m)) return 'sshOptions';
   return null;

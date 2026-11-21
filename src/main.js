@@ -128,9 +128,13 @@ function openConfig() {
   return config;
 }
 
-/** What the window's state call returns: the hosts, and whether the config file could not be read. */
+/**
+ * What the window's state call returns: the hosts, whether the config file
+ * could not be read, and the app-wide settings the General page shows (BBR-45).
+ */
 function appState() {
-  return { ...hosts.snapshot(), configFailure: store.failure };
+  const app = hosts.config ? { pollSeconds: hosts.config.pollSeconds, browseVersion: hosts.config.browseVersion, configPath: store.path } : null;
+  return { ...hosts.snapshot(), configFailure: store.failure, app };
 }
 
 /** Test hook: after start-up settles, record whether a window was opened, then quit. */
@@ -179,6 +183,24 @@ async function smoke(outPrefix) {
     await js(`document.querySelector('[data-tab=log]').click();`);
     await shot('host2-log');
   }
+  // General (BBR-45): the app-wide page reached from the sidebar. innerText leaves input values out, so they are read too.
+  await js(`document.getElementById('navGeneral').click();`);
+  await shot('general');
+  const general = await js(`(() => {
+    const p = document.getElementById('generalPage');
+    return { shown: !p.hidden, tabsHidden: document.querySelector('.tabs').hidden, text: p.innerText,
+      pollSeconds: document.getElementById('fPoll').value, autostart: document.getElementById('autostart').checked };
+  })()`);
+  // The first host's Settings with the Advanced section expanded (it is collapsed by default), and its field values.
+  await js(`document.querySelector('[data-host="${ids[0]}"]').click(); document.querySelector('[data-tab=settings]').click();
+    (() => { const d = document.getElementById('advanced'); window.__advancedWasOpen = d.open; d.open = true; })();`);
+  await shot('advanced');
+  const advanced = await js(`(() => {
+    const d = document.getElementById('advanced');
+    return { host: ${JSON.stringify(ids[0])}, collapsedByDefault: window.__advancedWasOpen === false, open: d.open, text: d.innerText,
+      remotePort: document.getElementById('fRemotePort').value, remoteBrowse: document.getElementById('fRemoteBrowse').value,
+      transport: document.getElementById('fTransport').textContent };
+  })()`);
   // BB_SMOKE_INVALID=1: submit an Add Host form whose id clashes with the first host's, and record the inline error.
   // The config refuses it before writing anything.
   let invalid = null;
@@ -196,7 +218,7 @@ async function smoke(outPrefix) {
     await shot(name, 600);
     dialogs[name] = await js(`(() => { const d = document.getElementById('${name}Dialog'); const t = d.open ? d.innerText : null; d.close(); return t; })()`);
   }
-  writeFileSync(`${outPrefix}.json`, JSON.stringify({ text, second, invalid, dialogs, errors, tray: Boolean(tray), snapshot: hosts.snapshot() }, null, 2));
+  writeFileSync(`${outPrefix}.json`, JSON.stringify({ text, second, general, advanced, invalid, dialogs, errors, tray: Boolean(tray), snapshot: hosts.snapshot() }, null, 2));
   await quit();
 }
 
@@ -366,6 +388,17 @@ function registerIpc() {
   ipcMain.handle('setAutostart', (_e, on) => {
     setAutostart(Boolean(on), launchArgv());
     trayUpdate.run(); // the tray's Start at login checkbox follows
+  });
+  // The General page (BBR-45): app-wide settings go through the same store; only the poll interval is editable.
+  ipcMain.handle('saveAppSettings', async (_e, raw) => {
+    const clean = await hosts.editApp(raw, save);
+    logger.info('config', `saved app settings (poll every ${clean.pollSeconds}s)`);
+    return clean;
+  });
+  // Takes no argument from the page: it opens config.json and nothing else. openPath resolves to an error string.
+  ipcMain.handle('openConfigFile', async () => {
+    const err = await shell.openPath(store.path);
+    if (err) throw new Error(`Could not open ${store.path}: ${err}`);
   });
   ipcMain.handle('saveConfig', async (_e, id, raw) => {
     const clean = await hosts.editHost(id, raw, save);

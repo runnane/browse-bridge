@@ -1,13 +1,19 @@
 /* global bridge */
 import {
   AGGREGATE_CLASS, AGGREGATE_GLYPH, GLYPH, actionsView, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, fmtRate,
-  RELAY_LABEL, hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseHostForm, pickSelected, withHostSnapshot,
+  RELAY_LABEL, generalView, hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, pickSelected,
+  transportText, withHostSnapshot,
 } from './viewmodel.js';
 
 const $ = (id) => document.getElementById(id);
 const TABS = ['status', 'traffic', 'log', 'settings'];
-const FIELD_ERRORS = { id: 'errId', host: 'errHost', localAddress: 'errLocalAddress', sshOptions: 'errSshOptions' };
-const FIELD_INPUTS = { id: 'fId', host: 'fHost', localAddress: 'fAddr', sshOptions: 'fOpts' };
+const FIELD_ERRORS = { id: 'errId', host: 'errHost', localAddress: 'errLocalAddress', sshOptions: 'errSshOptions', remotePort: 'errRemotePort', remoteBrowse: 'errRemoteBrowse' };
+const FIELD_INPUTS = { id: 'fId', host: 'fHost', localAddress: 'fAddr', sshOptions: 'fOpts', remotePort: 'fRemotePort', remoteBrowse: 'fRemoteBrowse' };
+/** Host form fields inside the collapsed Advanced section: an error on one opens it. */
+const ADVANCED_FIELDS = new Set(['remotePort', 'remoteBrowse']);
+/** The General page's fields (BBR-45); BBR-48 adds its checkbox to the same page. */
+const GENERAL_ERRORS = { pollSeconds: 'errPollSeconds' };
+const GENERAL_INPUTS = { pollSeconds: 'fPoll' };
 
 /** HostManager snapshot: { overall, label, hosts: [per-host snapshot] }. */
 let state = null;
@@ -16,6 +22,10 @@ let selectedId = null;
 /** What the Settings form holds: an existing host (`id`) or a new one (`adding`). */
 let form = { adding: false, id: null };
 let settingsDirty = false;
+/** The General page is showing instead of the selected host's tabs. */
+let generalShown = false;
+/** The General form holds edits not yet applied: the 1 s refresh leaves its fields alone. */
+let generalDirty = false;
 /** Pairing codes the user closed, any host's: a closed dialog never comes back, and never brings another's back. */
 const dismissedPairs = new Set();
 /** The host list as last drawn; rebuilt only when it changes, so focus and clicks survive the 1 s refresh. */
@@ -36,10 +46,43 @@ const selected = () => hostById(state, selectedId);
 // ---------- tabs ----------
 
 function showTab(name) {
+  if (generalShown) setGeneral(false);
   for (const t of document.querySelectorAll('.tab')) t.setAttribute('aria-selected', String(t.dataset.tab === name));
   for (const n of TABS) $(`${n}Page`).hidden = n !== name;
   if (name === 'traffic') drawChart();
 }
+
+/**
+ * Show the General page (app-wide settings) in place of the host tabs, or go
+ * back to the tab that was showing. No host row is highlighted while it shows.
+ */
+function setGeneral(on) {
+  generalShown = on;
+  $('navGeneral').setAttribute('aria-selected', String(on));
+  document.querySelector('.tabs').hidden = on;
+  $('generalPage').hidden = !on;
+  const tab = document.querySelector('.tab[aria-selected="true"]')?.dataset.tab ?? 'status';
+  for (const n of TABS) $(`${n}Page`).hidden = on || n !== tab;
+  renderHostList();
+  if (!on && tab === 'traffic') drawChart();
+}
+
+async function openGeneral() {
+  if (!generalShown) {
+    setGeneral(true);
+    fillGeneral();
+  }
+  // The tray's Start at login item may have changed it since.
+  try {
+    $('autostart').checked = await bridge.autostart();
+  } catch (err) {
+    addFlash('bad', cleanError(err.message));
+  }
+}
+$('navGeneral').onclick = () => openGeneral();
+$('navGeneral').onkeydown = (ev) => {
+  if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openGeneral(); }
+};
 for (const t of document.querySelectorAll('.tab')) t.addEventListener('click', () => showTab(t.dataset.tab));
 document.addEventListener('keydown', (ev) => {
   if (ev.ctrlKey && /^[1-4]$/.test(ev.key)) {
@@ -113,7 +156,8 @@ function renderMessages() {
 
 function renderHostList() {
   // The selected row stays highlighted while adding a host: the toolbar still acts on it.
-  const rows = hostRows(state, selectedId);
+  // While General shows, General is the highlighted entry instead.
+  const rows = hostRows(state, generalShown ? null : selectedId);
   const key = JSON.stringify(rows);
   if (key === hostListKey) return;
   hostListKey = key;
@@ -149,6 +193,8 @@ function renderHostList() {
 }
 
 function select(id) {
+  // Choosing a host leaves General, even the host already selected.
+  if (generalShown) setGeneral(false);
   const changed = id !== selectedId || form.adding;
   selectedId = id;
   if (!changed) return;
@@ -173,6 +219,7 @@ function render() {
   $('sbGlyph').className = `glyph s-${AGGREGATE_CLASS[aggregate] ?? 'unknown'}`;
   $('sbLabel').textContent = state.hosts.length > 1 ? state.label : (s?.label ?? state.label);
   renderConfigFailure();
+  renderGeneral();
   if (!s) return;
 
   const g = GLYPH[s.overall] ?? '?';
@@ -475,6 +522,7 @@ function clearErrors() {
 function showError(text, field = errorField(text)) {
   clearErrors();
   if (field && FIELD_ERRORS[field] && (field !== 'id' || form.adding)) {
+    if (ADVANCED_FIELDS.has(field)) $('advanced').open = true;
     $(FIELD_ERRORS[field]).textContent = text;
     $(FIELD_ERRORS[field]).hidden = false;
     $(FIELD_INPUTS[field]).classList.add('invalid');
@@ -504,6 +552,9 @@ function fillSettings(cfg) {
     f.sshOptions.value = '';
     f.autoConnect.checked = true;
     f.countActions.checked = false;
+    f.remotePort.value = '';
+    f.remoteBrowse.value = '';
+    $('fTransport').textContent = transportText('ssh');
     $('formTitle').textContent = 'New host';
     $('addrHint').textContent = "Leave empty for the next free 127.0.0.x; the port is always the relay's own";
     $('btnApply').textContent = 'Add Host';
@@ -517,6 +568,10 @@ function fillSettings(cfg) {
     f.sshOptions.value = cfg.sshOptions.join(', ');
     f.autoConnect.checked = cfg.autoConnect;
     f.countActions.checked = cfg.countActions;
+    // The Advanced section's fields are refilled; whether it is open is left as the user set it.
+    f.remotePort.value = String(cfg.remotePort);
+    f.remoteBrowse.value = cfg.remoteBrowse;
+    $('fTransport').textContent = transportText(cfg.transport);
     $('formTitle').textContent = `Host ${cfg.id}${cfg.name && cfg.name !== cfg.id ? ` — ${cfg.name}` : ''}`;
     $('addrHint').textContent = `The extension pairs with ${pairingAddressOf(cfg)}`;
     $('btnApply').textContent = 'Apply';
@@ -528,10 +583,7 @@ function fillSettings(cfg) {
   setDirty(false);
 }
 
-$('settings').addEventListener('input', (ev) => {
-  if (ev.target.id === 'autostart') return;
-  setDirty(true);
-});
+$('settings').addEventListener('input', () => setDirty(true));
 $('btnReset').onclick = () => {
   if (form.adding) {
     form = { adding: false, id: selectedId };
@@ -555,6 +607,7 @@ $('settings').addEventListener('submit', async (ev) => {
   const parsed = parseHostForm({
     id: f.hostId.value, name: f.hostName.value, host: f.host.value,
     localAddress: f.localAddress.value, sshOptions: f.sshOptions.value, autoConnect: f.autoConnect.checked, countActions: f.countActions.checked,
+    remotePort: f.remotePort.value, remoteBrowse: f.remoteBrowse.value,
   }, { adding: target.adding });
   if (parsed.error) return showError(parsed.error, parsed.field);
   try {
@@ -580,6 +633,81 @@ $('settings').addEventListener('keydown', (ev) => {
     if (settingsDirty || form.adding) $('settings').requestSubmit();
   }
 });
+// ---------- General: app-wide settings (BBR-45) ----------
+
+function clearGeneralErrors() {
+  $('generalError').hidden = true;
+  for (const [field, id] of Object.entries(GENERAL_ERRORS)) {
+    $(id).hidden = true;
+    $(GENERAL_INPUTS[field]).classList.remove('invalid');
+  }
+}
+
+/** An error next to the General field it is about, or above the page (e.g. the unreadable-config refusal). */
+function showGeneralError(text, field = null) {
+  clearGeneralErrors();
+  if (field && GENERAL_ERRORS[field]) {
+    $(GENERAL_ERRORS[field]).textContent = text;
+    $(GENERAL_ERRORS[field]).hidden = false;
+    $(GENERAL_INPUTS[field]).classList.add('invalid');
+    $(GENERAL_INPUTS[field]).focus();
+  } else {
+    $('generalError').textContent = text;
+    $('generalError').hidden = false;
+  }
+}
+
+function setGeneralDirty(dirty) {
+  generalDirty = dirty;
+  $('btnGeneralApply').disabled = !dirty;
+  $('btnGeneralReset').disabled = !dirty;
+}
+
+/** The read-only lines follow every refresh; the poll field only while it holds no unapplied edit. */
+function renderGeneral() {
+  const v = generalView(state?.app);
+  if (!v) return;
+  $('gBrowseVersion').textContent = v.browseVersion;
+  $('gPinNote').textContent = v.pinNote;
+  $('gConfigPath').textContent = v.configPath;
+  if (!generalDirty && document.activeElement !== $('fPoll')) $('fPoll').value = v.pollSeconds;
+}
+
+/** Discard unapplied edits and show what the config holds. */
+function fillGeneral() {
+  clearGeneralErrors();
+  setGeneralDirty(false);
+  const v = generalView(state?.app);
+  if (v) $('fPoll').value = v.pollSeconds;
+  renderGeneral();
+}
+
+$('general').addEventListener('input', (ev) => {
+  // Start at login saves on change, on its own; it never makes the form dirty.
+  if (ev.target.id === 'autostart') return;
+  setGeneralDirty(true);
+});
+$('general').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const parsed = parseGeneralForm({ pollSeconds: $('fPoll').value });
+  if (parsed.error) return showGeneralError(parsed.error, parsed.field);
+  try {
+    const app = await bridge.saveAppSettings(parsed.fields);
+    await refresh();
+    fillGeneral();
+    addFlash('ok', `General: settings applied; each host's status is checked every ${app.pollSeconds} s.`);
+  } catch (err) {
+    showGeneralError(cleanError(err.message));
+  }
+});
+$('general').addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
+    ev.preventDefault();
+    if (generalDirty) $('general').requestSubmit();
+  }
+});
+$('btnGeneralReset').onclick = () => fillGeneral();
+$('btnOpenConfig').onclick = () => bridge.openConfigFile().catch((err) => addFlash('bad', cleanError(err.message)));
 $('autostart').addEventListener('change', (ev) => bridge.setAutostart(ev.target.checked));
 
 $('btnRemoveHost').onclick = () => {
@@ -639,6 +767,7 @@ const ready = (async () => {
   form = { adding: false, id: selectedId };
   render();
   fillSettings(selected()?.config);
+  fillGeneral();
   if (selected()?.overall === 'unconfigured' && !state.configFailure) showTab('settings');
   $('autostart').checked = await bridge.autostart();
   $('sbVersion').textContent = await bridge.version();
