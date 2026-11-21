@@ -20,7 +20,9 @@ npm pack @opencode/browse-linux-x64@<pinned> && tar xzf *.tgz
 
 Is the pin still safe against upstream's newest stable? `node scripts/check-browse-pin.js` compares the extension protocol range and pairing scheme from source (network, not in the gates; exit 0 compatible, 1 not, 2 network error). It does not replace the `BROWSE_BIN` run.
 
-The gates need only node, so a fresh worktree is enough (`worktreeSafe: true`).
+The gates need node plus the system tools the setup script uses (bash, sh,
+tar, gzip, coreutils, grep, sed, awk, openssl), all from the host, nothing from
+`node_modules`, so a fresh worktree is enough (`worktreeSafe: true`).
 `npm install` is needed only to *launch* the app (Electron).
 
 ## What each test needs, and leaves behind
@@ -29,6 +31,7 @@ The gates need only node, so a fresh worktree is enough (`worktreeSafe: true`).
 | --- | --- | --- | --- |
 | `test/integration.test.js` | a real browse relay, throwaway `HOME` | relay 39988, proxy 127.0.0.2:39988, inner 39991 | the pid `browse status` reports |
 | `test/ssh.test.js` | an unprivileged `sshd` + a relay, throwaway keys/`HOME` | sshd 39922, relay 39978, proxy 127.0.0.3:39978, forward 39981 | the sshd pid file and the relay's port owner |
+| `test/setup-script.test.js` | `SETUP_SCRIPT` under `bash -s` in a throwaway `HOME`, against a fake `curl` serving a locally made tarball; PATH is an allow-list of symlinked host tools plus fakes, never `/usr/bin`, so the real curl and npm cannot run | none | nothing to stop (the fake browse only prints); its `bb-setup-*` / `bb-piece-*` temp dirs stay in the OS tmpdir |
 
 `node --test` runs files **in parallel**, so the two files' ports must never
 overlap. That happened once and made both tests fail on each other's relay.
