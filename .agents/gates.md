@@ -18,6 +18,8 @@ npm pack @opencode/browse-linux-x64@<pinned> && tar xzf *.tgz
 # → /tmp/bb-browse/package/bin/browse
 ```
 
+Is the pin still safe against upstream's newest stable? `node scripts/check-browse-pin.js` compares the extension protocol range and pairing scheme from source (network, not in the gates; exit 0 compatible, 1 not, 2 network error). It does not replace the `BROWSE_BIN` run.
+
 The gates need only node, so a fresh worktree is enough (`worktreeSafe: true`).
 `npm install` is needed only to *launch* the app (Electron).
 
