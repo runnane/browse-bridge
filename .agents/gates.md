@@ -18,6 +18,25 @@ npm pack @opencode/browse-linux-x64@<pinned> && tar xzf *.tgz
 # → /tmp/bb-browse/package/bin/browse
 ```
 
+**Measured auto-mode classifier verdicts on that step** (newest first). Send
+it as the plain step above, alone: no pipes, no commands appended. The
+classifier judges a compound call as a whole. A refusal is never routed
+around (a container copy-out, another tool, a rewording); the owner confirms
+the exact step instead.
+
+| date | call | verdict |
+| --- | --- | --- |
+| 2026-11-22 | `npm pack @opencode/browse-linux-x64@0.1.5 2>&1 \| grep …` + unpack + run, with two unrelated commands appended | refused, *Undermining Oversight*. The plain 0.1.5 step is unmeasured; BBR-40 holds the owner's ask |
+| 2026-11-22 | the plain step for 0.1.4 (`mkdir`, `cd`, `npm pack`, `tar xzf`, `browse version`) | passed |
+| 2026-11-22 | `npm pack` of the arm64 and arm64-musl 0.1.4 tarballs, not run | passed |
+| 2026-11-22 | curl of the Chrome Web Store listing with a Google consent cookie | refused, *Unauthorized Access*. The store's version needs a real browser (BBR-51) |
+| 2026-11-21 | `npm pack` of 0.1.4 and 0.1.5, then `browse --version` | refused, *Undermining Oversight* |
+
+Real tarballs downloaded and run **inside throwaway Docker containers** passed
+on both days (BBR-64, BBR-66, BBR-67). A binary inside a container does not
+give `BROWSE_BIN` a host path, and copying one out to dodge a refusal is
+routing around it.
+
 Is the pin still safe against upstream's newest stable? `node scripts/check-browse-pin.js` compares the extension protocol range and pairing scheme from source (network, not in the gates; exit 0 compatible, 1 not, 2 network error). It does not replace the `BROWSE_BIN` run.
 
 The gates need node plus the system tools the setup script uses (bash, sh,
