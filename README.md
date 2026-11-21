@@ -153,6 +153,12 @@ settings:
 Only values that differ from the defaults are stored, so a later default (for
 example a new browse pin) still applies.
 
+If you edit the file by hand and it no longer reads (a JSON typo, an invalid
+value), the app keeps it: it copies the file to
+`config.json.broken-<timestamp>`, shows the error in the window and the tray
+menu, and saves nothing over it. Fix the file and click **Reload**, or click
+**Start Over** to replace it with one empty host.
+
 App-wide:
 
 | key | default | meaning |

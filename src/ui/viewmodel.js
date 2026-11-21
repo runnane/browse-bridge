@@ -90,6 +90,34 @@ export function withHostSnapshot(state, snap) {
   return { ...state, hosts: state.hosts.map((h) => (h.id === snap.id ? snap : h)) };
 }
 
+// ---------- config file ----------
+
+/**
+ * The phrase ConfigStore.save() refuses with while the config file is
+ * unreadable (config.js UNREADABLE_REFUSAL; the renderer cannot import
+ * config.js, so a test pins the two together).
+ */
+export const UNREADABLE_REFUSAL_TEXT = 'could not be read, so nothing is saved over it';
+
+/**
+ * The window's persistent bar for a config file that did not load (BBR-36),
+ * from the `configFailure` the state carries (ConfigStore's `failure`), or
+ * null when the file read fine. It names the file and the error, where the
+ * old bytes were kept, and that nothing is saved until the user acts.
+ */
+export function configFailureView(failure) {
+  if (!failure) return null;
+  const kept = failure.backup
+    ? ` The file as it was is kept at ${failure.backup}.`
+    : failure.backupError ? ` It could not be copied aside (${failure.backupError}).` : '';
+  return {
+    text: `Could not read ${failure.path}: ${failure.message}.${kept} `
+      + 'Settings are not saved over it: fix the file and choose Reload, or choose Start Over to replace it with one empty host.',
+    startOverText: `Replace ${failure.path} with a config holding one empty host? `
+      + (failure.backup ? `The unreadable file stays at ${failure.backup}.` : 'Its current contents are copied aside first; if they cannot be, nothing is replaced.'),
+  };
+}
+
 // ---------- log ----------
 
 /**
@@ -187,6 +215,8 @@ export function parseHostForm(form, { adding = false } = {}) {
  */
 export function errorField(message) {
   const m = String(message);
+  // Refused because the config file is unreadable (BBR-36): about no field the user typed.
+  if (m.includes(UNREADABLE_REFUSAL_TEXT)) return null;
   if (/not a valid ssh destination/.test(m)) return 'host';
   if (/host id .* must be|two hosts have the id/.test(m)) return 'id';
   if (/is used twice|localAddress|innerPort|no free (local port|loopback address)|loopback address/.test(m)) return 'localAddress';

@@ -4,8 +4,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
 
 contextBridge.exposeInMainWorld('bridge', {
-  // { overall, label, hosts: [per-host snapshot, …] }
+  // { overall, label, hosts: [per-host snapshot, …], configFailure: null | { path, message, backup, backupError } }
   state: invoke('state'),
+  // An unreadable config file (BBR-36): read it again, or replace it with one empty host (the old bytes are kept).
+  reloadConfig: invoke('reloadConfig'),
+  startOver: invoke('startOver'),
   log: invoke('log'),
   // The running version, "0.1.0+3 1b86d65" (core/version.js), for the status bar.
   version: invoke('version'),

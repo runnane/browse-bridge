@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeAppConfig, pairingAddress } from '../src/core/config.js';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ConfigStore, UNREADABLE_REFUSAL, normalizeAppConfig, pairingAddress } from '../src/core/config.js';
 import { Logger } from '../src/core/log.js';
 import {
-  PROFILE_NOTE, cleanError, errorField, fmtBytes, fmtDuration, hostRows, logForHost, logText,
+  PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, hostRows, logForHost, logText,
   pairingAddressOf, pairingView, parseHostForm, pickSelected, withHostSnapshot,
 } from '../src/ui/viewmodel.js';
 
@@ -48,6 +51,43 @@ test('viewmodel: a per-host state event replaces only that host; an unknown host
   assert.deepEqual(next.hosts.map((h) => [h.id, h.overall]), [['dev004', 'stopped'], ['dev005', 'ready']]);
   assert.equal(next.hosts[0], state.hosts[0], 'the other host is the same object');
   assert.equal(withHostSnapshot(state, hostSnap('ghost', 1)), state);
+});
+
+// ---------- config file (BBR-36) ----------
+
+test('viewmodel: an unreadable config file is a bar naming the file, the error and the kept copy; it survives a per-host event', () => {
+  assert.equal(configFailureView(null), null);
+  const failure = { path: '/cfg/config.json', message: 'Unexpected token } in JSON', backup: '/cfg/config.json.broken-2026-11-21T16-38-17-752Z', backupError: null };
+  const v = configFailureView(failure);
+  assert.equal(v.text, 'Could not read /cfg/config.json: Unexpected token } in JSON. The file as it was is kept at /cfg/config.json.broken-2026-11-21T16-38-17-752Z. '
+    + 'Settings are not saved over it: fix the file and choose Reload, or choose Start Over to replace it with one empty host.');
+  assert.match(v.startOverText, /stays at \/cfg\/config\.json\.broken-/);
+  const uncopied = configFailureView({ ...failure, backup: null, backupError: 'EACCES: permission denied' });
+  assert.match(uncopied.text, /could not be copied aside \(EACCES: permission denied\)/);
+  assert.doesNotMatch(uncopied.text, /kept at/);
+  // The failure rides on the state ipc answer; a per-host event must not drop it.
+  const state = { ...twoHosts(), configFailure: failure };
+  assert.equal(withHostSnapshot(state, hostSnap('dev005', '127.0.0.2', { overall: 'ready' })).configFailure, failure);
+});
+
+test('viewmodel: a save refused because the config file is unreadable is shown on the form, never on a field the user typed', () => {
+  assert.equal(UNREADABLE_REFUSAL_TEXT, UNREADABLE_REFUSAL, 'the window matches the phrase ConfigStore refuses with');
+  // A real refusal from a file whose own error would otherwise read as an ssh-host error.
+  const dir = mkdtempSync(join(tmpdir(), 'bb-vm-cfg-'));
+  const path = join(dir, 'config.json');
+  writeFileSync(path, JSON.stringify({ hosts: [{ id: 'dev004', host: '-oProxyCommand=x', localAddress: '127.0.0.300' }] }));
+  const store = new ConfigStore(path);
+  store.open();
+  assert.match(store.failure.message, /not a valid ssh destination/);
+  let refused = null;
+  try {
+    store.save({ hosts: [{ id: 'host-1', host: 'u@new.invalid' }] });
+  } catch (err) {
+    refused = err;
+  }
+  assert.ok(refused?.message.includes(UNREADABLE_REFUSAL));
+  assert.equal(errorField(refused.message), null);
+  assert.equal(errorField(cleanError(`Error invoking remote method 'saveConfig': Error: ${refused.message}`)), null);
 });
 
 // ---------- log ----------

@@ -1,6 +1,6 @@
 /* global bridge */
 import {
-  AGGREGATE_CLASS, AGGREGATE_GLYPH, GLYPH, actionsView, cleanError, errorField, fmtBytes, fmtDuration, fmtRate,
+  AGGREGATE_CLASS, AGGREGATE_GLYPH, GLYPH, actionsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, fmtRate,
   hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseHostForm, pickSelected, withHostSnapshot,
 } from './viewmodel.js';
 
@@ -102,7 +102,8 @@ function renderMessages() {
   const bars = flash.map((f) => f.el);
   const s = selected();
   if (s && !form.adding) {
-    if (s.overall === 'unconfigured') bars.push(message('info', `Set the SSH host for ${hostTitle(s)} in Settings to get started.`, { dismissable: false }));
+    // With an unreadable config file the blank host is not a first start: the config bar says what happened instead.
+    if (s.overall === 'unconfigured' && !state?.configFailure) bars.push(message('info', `Set the SSH host for ${hostTitle(s)} in Settings to get started.`, { dismissable: false }));
     for (const w of s.warnings) bars.push(message('warn', `${hostTitle(s)}: ${w}`, { dismissable: false }));
   }
   $('messages').replaceChildren(...bars);
@@ -171,6 +172,7 @@ function render() {
   $('sbGlyph').textContent = AGGREGATE_GLYPH[aggregate] ?? '?';
   $('sbGlyph').className = `glyph s-${AGGREGATE_CLASS[aggregate] ?? 'unknown'}`;
   $('sbLabel').textContent = state.hosts.length > 1 ? state.label : (s?.label ?? state.label);
+  renderConfigFailure();
   if (!s) return;
 
   const g = GLYPH[s.overall] ?? '?';
@@ -209,6 +211,51 @@ function render() {
   renderPairing();
   renderMessages();
 }
+
+// ---------- unreadable config file (BBR-36) ----------
+
+/** The persistent bar: shown while main reports the config file unreadable, whatever host or form is showing. */
+function renderConfigFailure() {
+  const v = configFailureView(state?.configFailure);
+  $('configFailure').hidden = !v;
+  if (v && $('configFailureText').textContent !== v.text) $('configFailureText').textContent = v.text;
+}
+
+/** After Reload or Start over the host list may be a different one: select afresh and refill the form. */
+async function afterConfigChange(ok) {
+  await refresh();
+  selectedId = null;
+  select(pickSelected(state.hosts, null));
+  if (state.configFailure) addFlash('bad', 'The config file still could not be read; nothing was changed.');
+  else addFlash('ok', ok);
+}
+
+$('btnConfigReload').onclick = async () => {
+  try {
+    await bridge.reloadConfig();
+    await afterConfigChange('The config file was read again.');
+  } catch (err) {
+    addFlash('bad', cleanError(err.message));
+  }
+};
+$('btnConfigStartOver').onclick = () => {
+  const v = configFailureView(state?.configFailure);
+  if (!v) return;
+  $('startOverText').textContent = v.startOverText;
+  $('startOverDialog').showModal();
+};
+$('btnStartOverCancel').onclick = () => $('startOverDialog').close();
+$('btnStartOverConfirm').onclick = async () => {
+  $('startOverDialog').close();
+  try {
+    await bridge.startOver();
+    await afterConfigChange('Started over with one empty host. Set its SSH host in Settings.');
+    showTab('settings');
+  } catch (err) {
+    addFlash('bad', cleanError(err.message));
+    await refresh();
+  }
+};
 
 function renderTraffic(s) {
   const t = s.traffic;
@@ -590,7 +637,7 @@ const ready = (async () => {
   form = { adding: false, id: selectedId };
   render();
   fillSettings(selected()?.config);
-  if (selected()?.overall === 'unconfigured') showTab('settings');
+  if (selected()?.overall === 'unconfigured' && !state.configFailure) showTab('settings');
   $('autostart').checked = await bridge.autostart();
   $('sbVersion').textContent = await bridge.version();
   fillAbout(await bridge.about());
