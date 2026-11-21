@@ -78,6 +78,19 @@ export class TunnelSupervisor extends EventEmitter {
     if (this.wanted) this.spawnOnce();
   }
 
+  /**
+   * Start over now, as if freshly started (BBR-38): after a resume the forward
+   * may sit on a dead TCP connection, and a retry may be waiting out a long
+   * backoff. Forget the failure count, drop any pending retry and respawn.
+   * Does nothing for a forward that is not wanted. Returns whether it acted.
+   */
+  kick() {
+    if (!this.wanted) return false;
+    this.failures = 0;
+    this.restart();
+    return true;
+  }
+
   stop() {
     this.wanted = false;
     clearTimeout(this.timer);
