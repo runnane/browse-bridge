@@ -35,6 +35,9 @@ contextBridge.exposeInMainWorld('bridge', {
   openLogFile: invoke('openLogFile'),
   autostart: invoke('autostart'),
   setAutostart: invoke('setAutostart'),
+  // The application-menu entry (BBR-48): appMenu() -> { packaged, enabled }; setAppMenu(on).
+  appMenu: invoke('appMenu'),
+  setAppMenu: invoke('setAppMenu'),
   // A per-host snapshot whenever that host changes.
   onState: (fn) => ipcRenderer.on('state', (_e, s) => fn(s)),
   onLog: (fn) => ipcRenderer.on('log', (_e, entry) => fn(entry)),

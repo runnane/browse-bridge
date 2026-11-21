@@ -7,7 +7,7 @@ import { ConfigStore, DEFAULTS, UNREADABLE_REFUSAL, normalizeAppConfig, pairingA
 import { Logger } from '../src/core/log.js';
 import {
   AGENT_INSTALL_COMMAND, DEFAULT_RELAY_PORT, DEFAULT_REMOTE_BROWSE, PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration,
-  generalView, hostRows, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, parsePort, pickSelected, transportText, withHostSnapshot,
+  appMenuView, generalView, hostRows, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, parsePort, pickSelected, transportText, withHostSnapshot,
 } from '../src/ui/viewmodel.js';
 
 // Two hosts as HostManager.snapshot() reports them: A on localhost:19988, B on 127.0.0.2:19988 (BBR-21).
@@ -258,6 +258,13 @@ test('viewmodel: the General page shows the pin and the config path, and names t
   const v = generalView({ pollSeconds: 10, browseVersion: '0.1.4', configPath: '/cfg/config.json' });
   assert.deepEqual([v.pollSeconds, v.browseVersion, v.configPath], ['10', '0.1.4', '/cfg/config.json']);
   assert.match(v.pinNote, /not built yet \(BBR-41\)/);
+});
+
+test('viewmodel: the application-menu checkbox is hidden for a packaged build and follows the entry otherwise (BBR-48)', () => {
+  assert.deepEqual(appMenuView({ packaged: true, enabled: true }), { hidden: true, checked: false });
+  assert.deepEqual(appMenuView(null), { hidden: true, checked: false });
+  assert.deepEqual(appMenuView({ packaged: false, enabled: true }), { hidden: false, checked: true });
+  assert.deepEqual(appMenuView({ packaged: false, enabled: false }), { hidden: false, checked: false });
 });
 
 // ---------- formatting ----------

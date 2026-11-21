@@ -177,6 +177,13 @@ App-wide (the **General** page, below the host list):
 Start at login is on the General page too. It is not a config key: it is the
 XDG autostart entry, and it saves as soon as you tick it.
 
+**Show in application menu** (General, source installs only) writes
+`$XDG_DATA_HOME/applications/browse-bridge.desktop` (`~/.local/share/applications/`
+when unset) and installs an icon under `icons/hicolor/`, so KRunner, the
+launcher or GNOME's overview can start browse-bridge without a terminal. Unlike
+the login entry it does not pass `--hidden`: the window opens. Unticking removes
+both. It is hidden in a packaged build, which ships its own entry.
+
 Per host (each entry in `hosts`):
 
 | key | default | in the window | meaning |

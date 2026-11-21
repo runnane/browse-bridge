@@ -366,8 +366,11 @@
         <div class="msg bad" id="generalError" hidden style="margin-bottom:10px"></div>
         <div class="form" style="align-items:center" id="generalForm">
           <span class="label">Startup:</span>
-          <span><label class="check"><input type="checkbox" id="autostart">Start browse-bridge at login</label></span>
-          <span></span><div class="hint"><div class="muted">Takes effect at once. It starts in the tray; each host's own start-up choice is in its Settings</div></div>
+          <span>
+            <div><label class="check"><input type="checkbox" id="autostart">Start browse-bridge at login</label></div>
+            <div id="appMenuRow" hidden><label class="check"><input type="checkbox" id="appMenu">Show in application menu</label></div>
+          </span>
+          <span></span><div class="hint"><div class="muted">Takes effect at once. It starts in the tray; each host's own start-up choice is in its Settings</div><div class="muted" id="appMenuNote" hidden>The application menu entry opens the window, so browse-bridge can be started again without a terminal (KRunner, the launcher, GNOME's overview)</div></div>
           <label class="label" for="fPoll">Status poll interval:</label>
           <span><input type="text" id="fPoll" name="pollSeconds" inputmode="numeric" spellcheck="false" placeholder="10" style="width:90px"> seconds</span>
           <span></span><div class="hint"><div class="muted">How often each host's relay status is checked, 2 to 3600; applies to every host without reconnecting</div><div class="field-error" id="errPollSeconds" hidden></div></div>
