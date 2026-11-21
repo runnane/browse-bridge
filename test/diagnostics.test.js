@@ -89,6 +89,20 @@ test('diagnostics: an id that is another host number does not get renumbered, an
   assert.ok(text.includes('device list'));
 });
 
+test('diagnostics: a host set up as an ssh alias does not leak the user or domain ssh resolved it to', () => {
+  const alias = snap('gpu', 'GPU Box', 'gpu-rig', {
+    tunnel: { state: 'failed', detail: 'ssh: connect to host gpu-rig.lab.example port 22: Connection refused' },
+    statusError: 'bob@gpu-rig.lab.example: Permission denied (publickey)',
+  });
+  const text = buildDiagnostics(inputs({
+    hosts: [alias],
+    log: [{ ts: 't', level: 'info', source: 'tunnel', host: 'gpu', message: 'jump via bob@gpu-rig.lab.example' }],
+  }));
+  for (const leak of ['bob@', 'lab.example', 'gpu-rig']) assert.ok(!text.includes(leak), `bundle must not contain ${leak}`);
+  assert.match(text, /connect to host host-1 port 22/);
+  assert.match(text, /status error: host-1: Permission denied/);
+});
+
 test('tray: a top-level Copy diagnostics item always copies with names hidden', () => {
   const model = trayMenuModel({ label: 'x', hosts: [] });
   const item = model.find((m) => m.action === 'copyDiagnostics');

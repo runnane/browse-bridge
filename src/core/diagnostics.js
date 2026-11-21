@@ -48,7 +48,14 @@ function hostReplacer(hosts, homeDir) {
     let t = String(text);
     // The home directory carries the account name (config and log paths).
     if (home) t = t.split(home).join('~');
-    return re ? t.replace(re, (m) => map.get(m.toLowerCase())) : t;
+    if (!re) return t;
+    t = t.replace(re, (m) => map.get(m.toLowerCase()));
+    // A host configured as an ssh alias ("gpu") still reaches the text as ssh
+    // resolved it ("bob@gpu.lab.example"): fold the user and the domain around a
+    // replaced name into it, so neither survives the replacement.
+    return t
+      .replace(/(?<![A-Za-z0-9._-])[A-Za-z0-9._-]+@(host-\d+)(?![A-Za-z0-9-])/g, '$1')
+      .replace(/(?<![A-Za-z0-9])(host-\d+)(?:\.[A-Za-z0-9-]+)+(?![A-Za-z0-9-])/g, '$1');
   };
 }
 
