@@ -290,6 +290,66 @@ test('hosts: one host\'s tunnel failing leaves the other host\'s bridge untouche
   await check();
 });
 
+test('hosts: kick reconnects every wanted host at once, leaves a stopped one alone, and debounces (BBR-38)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const p = await freePorts(6);
+  const { children, spawnImpl } = fakeSpawner();
+  let clock = 1_000_000;
+  const logger = new Logger();
+  const mgr = new HostManager({ logger, localEnv: { PATH: '/usr/bin:/bin', HOME: tmpdir() }, spawnImpl, now: () => clock });
+  t.after(() => mgr.stopAll());
+  const ssh = (id, addr, [inner, remote]) => ({ id, host: `dev-${id}`, localAddress: addr, innerPort: inner, remotePort: remote, autoConnect: true });
+  await mgr.apply({
+    pollSeconds: 60,
+    hosts: [ssh('a', '127.0.0.4', p.slice(0, 2)), localHost('b', p.slice(2, 4)), ssh('c', '127.0.0.5', p.slice(4, 6))],
+  });
+  // Never a real ssh: from here on record each controller's master close and poll instead.
+  // (connect() armed a poll at 0 ms; the ticks below would fire it.)
+  const events = [];
+  for (const id of mgr.ids()) {
+    const ctl = mgr.get(id);
+    ctl.transport = () => ({ closeMaster: async () => { events.push(`close ${id}`); } });
+    ctl.pollNow = async () => { events.push(`poll ${id}`); };
+  }
+  const flush = () => new Promise((r) => setImmediate(r));
+  const forHost = (id) => children.filter((c) => c.args.at(-1) === `dev-${id}`);
+  assert.deepEqual([forHost('a').length, forHost('c').length], [1, 1]);
+  await mgr.get('c').disconnect();
+  assert.equal(mgr.get('c').wanted, false, 'c is stopped by the user');
+
+  // Host a's forward fails until it waits out the 30 s cap.
+  for (let n = 1; n <= 6; n++) {
+    forHost('a').at(-1).emit('exit', 255, null);
+    if (n < 6) t.mock.timers.tick(2 ** (n - 1) * 1000);
+  }
+  assert.match(mgr.get('a').tunnel.detail, /retry in 30s$/);
+  assert.equal(forHost('a').length, 6);
+  await flush();
+  events.length = 0; // the set-up's own poll and c's disconnect
+
+  assert.deepEqual(mgr.kick('resume'), ['a', 'b']);
+  assert.equal(forHost('a').length, 7, 'a respawns ssh at once');
+  assert.equal(mgr.get('a').tunnel.failures, 0, 'with its backoff reset');
+  assert.equal(forHost('c').length, 1, 'the stopped host is not restarted');
+  await flush();
+  assert.deepEqual(events, ['close a', 'close b', 'poll a', 'poll b'], 'each wanted host polls now, on a fresh status master');
+  assert.ok(logger.ring.some((e) => e.source === 'power' && e.message === 'resume: reconnecting a, b'), 'one line names the reason');
+  assert.equal(await mgr.get('c').kick(), false, 'a stopped controller refuses a kick of its own');
+  assert.equal(events.length, 4, 'and neither closes a master nor polls');
+
+  clock += 2000;
+  assert.equal(mgr.kick('unlock-screen'), null, 'a second kick 2 s later is skipped');
+  await flush();
+  assert.equal(forHost('a').length, 7, 'one restart per host, not two');
+  assert.equal(events.length, 4, 'and one poll');
+  assert.ok(logger.ring.some((e) => e.source === 'power' && /^unlock-screen: .*skipped$/.test(e.message)));
+
+  clock += 10_000;
+  assert.deepEqual(mgr.kick('resume'), ['a', 'b'], 'a kick after the debounce window acts again');
+  assert.equal(forHost('a').length, 8);
+  assert.equal(forHost('c').length, 1);
+});
+
 test('hosts: apply() with one host changed replaces only that one; a removed host is stopped', async (t) => {
   const p = await freePorts(9);
   const { mgr } = manager(t);

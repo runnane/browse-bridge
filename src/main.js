@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Notification, Tray, clipboard, ipcMain, nativeImage, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, Menu, Notification, Tray, clipboard, ipcMain, nativeImage, nativeTheme, powerMonitor, shell } from 'electron';
 import os from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -106,6 +106,10 @@ async function start() {
 
   // Creates the controllers and connects the hosts with autoConnect on.
   await hosts.apply(config);
+  // After a wake, reconnect every tunnel now instead of waiting out keepalive and backoff (BBR-38).
+  // unlock-screen is emitted on macOS and Windows only; resume covers Linux.
+  powerMonitor.on('resume', () => hosts.kick('resume'));
+  powerMonitor.on('unlock-screen', () => hosts.kick('unlock-screen'));
   registerIpc();
   renderTray();
   logger.info('app', `started ${appVersion}; config ${p.config}`);

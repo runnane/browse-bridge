@@ -287,6 +287,48 @@ test('tunnel: ssh exit → retrying with the reason, then respawns; stop kills o
   assert.deepEqual(states.slice(0, 3), ['starting', 'retrying', 'starting']);
 });
 
+test('tunnel: kick on a forward retrying with a 30 s backoff spawns ssh now and resets the backoff (BBR-38)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { children, spawnImpl } = fakeSpawner();
+  const sup = new TunnelSupervisor(normalizeConfig({ host: 'dev004', innerPort: 1 }), { spawnImpl });
+  // Stop even when an assertion fails: a live fake child keeps confirmUp probing for ever.
+  t.after(() => sup.stop());
+  sup.start();
+  // Six failures in a row: 1, 2, 4, 8, 16 s, then the 30 s cap.
+  for (let n = 1; n <= 6; n++) {
+    children.at(-1).emit('exit', 255, null);
+    if (n < 6) t.mock.timers.tick(backoffMs(n));
+  }
+  assert.equal(children.length, 6);
+  assert.equal(sup.state, 'retrying');
+  assert.match(sup.detail, /retry in 30s$/);
+
+  assert.equal(sup.kick(), true);
+  assert.equal(children.length, 7, 'kick spawns ssh at once, without waiting out the 30 s backoff');
+  assert.equal(sup.failures, 0, 'kick resets the failure count');
+  t.mock.timers.tick(30_000);
+  assert.equal(children.length, 7, 'the old 30 s retry was cancelled');
+
+  children.at(-1).emit('exit', 255, null);
+  assert.match(sup.detail, /retry in 1s$/, 'the next failure starts the backoff from 1 s again');
+  t.mock.timers.tick(1000);
+  assert.equal(children.length, 8);
+  sup.stop();
+});
+
+test('tunnel: kick on a stopped forward spawns nothing', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { children, spawnImpl } = fakeSpawner();
+  const sup = new TunnelSupervisor(normalizeConfig({ host: 'dev004', innerPort: 1 }), { spawnImpl });
+  assert.equal(sup.kick(), false, 'never started');
+  sup.start();
+  sup.stop();
+  assert.equal(sup.kick(), false, 'stopped by the user');
+  t.mock.timers.tick(60_000);
+  assert.equal(children.length, 1);
+  assert.equal(sup.state, 'stopped');
+});
+
 test('tunnel: retarget restarts the forward on the new remote port', () => {
   const { children, spawnImpl } = fakeSpawner();
   const sup = new TunnelSupervisor(normalizeConfig({ host: 'dev004', innerPort: 1 }), { spawnImpl });

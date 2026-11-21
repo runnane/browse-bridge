@@ -59,6 +59,9 @@ export function runHostAction(manager, action, id) {
   return fn(manager.controller(id));
 }
 
+/** Kicks closer together than this are one event: resume and unlock-screen often fire together (BBR-38). */
+export const KICK_DEBOUNCE_MS = 5000;
+
 /**
  * Owns one Controller per configured host. UI-agnostic like Controller:
  * `apply(config)` brings the set of controllers in line with a config, and
@@ -66,8 +69,11 @@ export function runHostAction(manager, action, id) {
  * `id` naming the host.
  */
 export class HostManager extends EventEmitter {
-  constructor({ logger, controlDir = null, localEnv = process.env, spawnImpl, createController } = {}) {
+  constructor({ logger, controlDir = null, localEnv = process.env, spawnImpl, createController, now = Date.now } = {}) {
     super();
+    this.now = now;
+    /** When the last kick acted (ms, from `now`), or null. */
+    this.lastKickAt = null;
     this.logger = logger;
     this.controlDir = controlDir;
     this.localEnv = localEnv;
@@ -217,6 +223,28 @@ export class HostManager extends EventEmitter {
     const hosts = this.ids().map((id) => this.get(id)).filter(Boolean).map((ctl) => ctl.snapshot());
     const overall = aggregateState(hosts);
     return { overall, label: AGGREGATE[overall], hosts };
+  }
+
+  /**
+   * Reconnect every wanted host now (BBR-38), after a resume or unlock: each
+   * one's forward restarts with its backoff reset and a poll runs. A host the
+   * user stopped is left alone. A kick within KICK_DEBOUNCE_MS of the last one
+   * that acted is skipped, so a resume and an unlock together restart each
+   * host once. Returns the ids kicked, or null when skipped.
+   */
+  kick(reason) {
+    const at = this.now();
+    if (this.lastKickAt !== null && at - this.lastKickAt < KICK_DEBOUNCE_MS) {
+      this.logger.info('power', `${reason}: reconnected ${Math.round((at - this.lastKickAt) / 1000)}s ago; skipped`);
+      return null;
+    }
+    this.lastKickAt = at;
+    const wanted = this.ids().filter((id) => this.get(id)?.wanted);
+    this.logger.info('power', `${reason}: reconnecting ${wanted.length ? wanted.join(', ') : 'no host (none connected)'}`);
+    for (const id of wanted) {
+      this.get(id).kick().catch((err) => this.logger.error('power', `host ${id}: reconnect failed: ${err.message}`));
+    }
+    return wanted;
   }
 
   /** Disconnect every host (on quit). The controllers stay, so apply() can reconnect them. */

@@ -210,6 +210,21 @@ export class Controller extends EventEmitter {
     this.changed();
   }
 
+  /**
+   * Reconnect now rather than waiting out keepalive and backoff (BBR-38): the
+   * forward restarts with its backoff reset, the status master (which rode the
+   * same dead network) is closed so the next poll dials afresh, then a poll
+   * runs. A host that is not wanted is left alone. Returns whether it acted.
+   */
+  async kick() {
+    if (!this.wanted) return false;
+    this.tunnel?.kick();
+    if (this.configured) await this.transport().closeMaster(this.controlDir);
+    if (!this.wanted) return false;
+    await this.pollNow();
+    return true;
+  }
+
   async reconfigure(cfg) {
     const was = this.wanted;
     await this.disconnect();
