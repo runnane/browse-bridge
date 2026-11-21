@@ -1,6 +1,5 @@
-import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { baseSshOptions } from './exec.js';
+import { baseSshOptions, guardedSpawn } from './exec.js';
 import { probePort } from './proxy.js';
 import { classifySshError } from './ssherror.js';
 
@@ -33,7 +32,7 @@ export function tunnelArgs(cfg, remotePort) {
  * Events: "state" ({ state, detail }), "log" ({ level, message }).
  */
 export class TunnelSupervisor extends EventEmitter {
-  constructor(cfg, { spawnImpl = spawn, sshBin = 'ssh' } = {}) {
+  constructor(cfg, { spawnImpl = guardedSpawn, sshBin = 'ssh' } = {}) {
     super();
     this.cfg = cfg;
     this.spawnImpl = spawnImpl;
