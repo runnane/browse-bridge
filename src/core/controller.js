@@ -6,6 +6,7 @@ import { summarizeCounts } from './actions.js';
 import { pairingAddress } from './config.js';
 import { TunnelSupervisor } from './tunnel.js';
 import { SETUP_LABEL } from './labels.js';
+import { classifySshError } from './ssherror.js';
 import { SETUP_SCRIPT, parsePairOutput, parseSetupOutput, summarizeStatus, verifySetup } from './browse.js';
 
 /**
@@ -55,6 +56,8 @@ export class Controller extends EventEmitter {
     this.tunnelState = { state: 'stopped', detail: '' };
     this.status = null;
     this.statusError = null;
+    /** The last status poll's ssh failure when classifySshError recognised it ({ kind, text }), else null (BBR-46). */
+    this.statusProblem = null;
     this.statusAt = null;
     this.warnings = [];
     this.pairing = null;
@@ -104,6 +107,11 @@ export class Controller extends EventEmitter {
       tunnel: this.tunnelState,
       status: this.status,
       statusError: this.statusError,
+      /**
+       * What to do about a recognised ssh failure, { kind, text } or null (BBR-46): the tunnel's
+       * first, else the status poll's. The window's message bar and the tray submenu show it.
+       */
+      problem: this.wanted ? (this.tunnel?.problem ?? this.statusProblem ?? null) : null,
       statusAt: this.statusAt,
       warnings: this.warnings,
       traffic: this.proxy ? { ...this.proxy.stats, actions: plainActions(this.proxy.stats.actions) } : null,
@@ -206,6 +214,7 @@ export class Controller extends EventEmitter {
     this.proxy = null;
     if (this.configured) await this.transport().closeMaster(this.controlDir);
     this.tunnelState = { state: 'stopped', detail: '' };
+    this.statusProblem = null;
     this.logger.info('app', 'disconnected');
     this.changed();
   }
@@ -255,13 +264,17 @@ export class Controller extends EventEmitter {
     }
     const summary = summarizeStatus(parsed);
     if (!summary) {
-      const why = res.timedOut ? 'timed out' : (res.stderr.trim().split('\n').pop() || `exit ${res.code}`);
-      if (this.statusError !== why) this.logger.warn('status', `browse status failed: ${why}`);
+      // What to do when ssh itself failed (BBR-46); anything else is the raw last line, as before.
+      const c = res.timedOut ? null : classifySshError(res.stderr, { host: this.cfg.host });
+      const why = res.timedOut ? 'timed out' : (c.text || `exit ${res.code}`);
+      if (this.statusError !== why) this.logger.warn('status', `browse status failed: ${c && c.kind !== 'unknown' ? `${c.line} (${why})` : why}`);
       this.statusError = why;
+      this.statusProblem = c && c.kind !== 'unknown' ? { kind: c.kind, text: c.text } : null;
       this.status = null;
     } else {
       const prev = this.status;
       this.statusError = null;
+      this.statusProblem = null;
       this.status = summary;
       this.warnings = this.statusWarnings(summary);
       if (prev?.extensionConnected !== summary.extensionConnected) {

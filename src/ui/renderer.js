@@ -2,7 +2,7 @@
 import {
   AGGREGATE_CLASS, AGGREGATE_GLYPH, GLYPH, actionsView, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, fmtRate,
   RELAY_LABEL, appMenuView, generalView, hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, pickSelected,
-  transportText, withHostSnapshot,
+  transportText, withHostSnapshot, TEST_LABEL, aliasOptions, aliasWarning, parseTestForm, problemBar, testResultView,
 } from './viewmodel.js';
 
 const $ = (id) => document.getElementById(id);
@@ -158,6 +158,8 @@ function renderMessages() {
   if (s && !form.adding) {
     // With an unreadable config file the blank host is not a first start: the config bar says what happened instead.
     if (s.overall === 'unconfigured' && !state?.configFailure) bars.push(message('info', `Set the SSH host for ${hostTitle(s)} in Settings to get started.`, { dismissable: false }));
+    const problem = problemBar(s);
+    if (problem) bars.push(message(problem.kind, problem.text, { dismissable: false }));
     for (const w of s.warnings) bars.push(message('warn', `${hostTitle(s)}: ${w}`, { dismissable: false }));
   }
   $('messages').replaceChildren(...bars);
@@ -212,6 +214,7 @@ function select(id) {
   form = { adding: false, id };
   settingsDirty = false;
   flash.splice(0, flash.length);
+  clearTest();
   render();
   fillSettings(selected()?.config);
   showLog(logView);
@@ -591,11 +594,76 @@ function fillSettings(cfg) {
     $('btnRemoveHost').disabled = (state?.hosts.length ?? 0) < 2;
     $('btnRemoveHost').title = $('btnRemoveHost').disabled ? 'The last host cannot be removed; edit it instead' : 'Disconnect this host and remove it from the list';
   }
+  renderAliasWarning();
   setDirty(false);
 }
 
-$('settings').addEventListener('input', () => setDirty(true));
+// ---------- settings: ~/.ssh/config aliases and Test Connection (BBR-46) ----------
+
+/** The Host aliases main read from ~/.ssh/config: [{ alias, localForward }]. */
+let sshAliases = [];
+/** Bumped whenever the form moves on, so a test answer that comes back late is dropped. */
+let testSeq = 0;
+
+async function loadAliases() {
+  try {
+    sshAliases = await bridge.sshAliases();
+  } catch {
+    sshAliases = [];
+  }
+  $('sshAliases').replaceChildren(...aliasOptions(sshAliases).map((o) => Object.assign(document.createElement('option'), { value: o.value, label: o.label })));
+  renderAliasWarning();
+}
+
+function renderAliasWarning() {
+  const w = aliasWarning(sshAliases, $('fHost').value);
+  $('warnHost').hidden = !w;
+  $('warnHost').textContent = w ?? '';
+}
+
+function clearTest() {
+  testSeq++;
+  $('testResult').hidden = true;
+  $('btnTest').disabled = false;
+  $('btnTest').textContent = TEST_LABEL;
+}
+
+function showTest(kind, text) {
+  $('testResult').className = `msg ${kind}`;
+  $('testResultText').textContent = text;
+  $('testResult').hidden = false;
+}
+
+$('btnTest').onclick = async () => {
+  const f = $('settings');
+  const parsed = parseTestForm({ host: f.host.value, sshOptions: f.sshOptions.value, remoteBrowse: f.remoteBrowse.value });
+  clearTest();
+  // In the test's own bar: a clean Edit form is refilled every second, which clears the field errors.
+  if (parsed.error) return showTest('bad', parsed.error);
+  const seq = testSeq;
+  $('btnTest').disabled = true;
+  $('btnTest').textContent = 'Testing…';
+  showTest('info', `Logging in to ${parsed.fields.host}…`);
+  let view;
+  try {
+    view = testResultView(await bridge.testConnection(parsed.fields));
+  } catch (err) {
+    view = { kind: 'bad', text: cleanError(err.message) };
+  }
+  if (seq !== testSeq) return; // the form moved on while ssh ran
+  $('btnTest').disabled = false;
+  $('btnTest').textContent = TEST_LABEL;
+  showTest(view.kind, view.text);
+};
+
+$('fHost').addEventListener('input', renderAliasWarning);
+$('settings').addEventListener('input', () => {
+  setDirty(true);
+  // A result is about the fields it was run with.
+  if (!$('testResult').hidden || $('btnTest').disabled) clearTest();
+});
 $('btnReset').onclick = () => {
+  clearTest();
   if (form.adding) {
     form = { adding: false, id: selectedId };
     render();
@@ -605,6 +673,8 @@ $('btnReset').onclick = () => {
 $('btnAddHost').onclick = () => {
   form = { adding: true, id: null };
   flash.splice(0, flash.length);
+  clearTest();
+  loadAliases(); // the user may have just edited ~/.ssh/config
   fillSettings(null);
   render();
   showTab('settings');
@@ -787,6 +857,7 @@ const ready = (async () => {
   form = { adding: false, id: selectedId };
   render();
   fillSettings(selected()?.config);
+  loadAliases();
   fillGeneral();
   if (selected()?.overall === 'unconfigured' && !state.configFailure) showTab('settings');
   $('autostart').checked = await bridge.autostart();

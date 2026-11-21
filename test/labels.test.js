@@ -5,7 +5,8 @@ import { normalizeConfig } from '../src/core/config.js';
 import { Controller } from '../src/core/controller.js';
 import { Logger } from '../src/core/log.js';
 import { trayMenuModel } from '../src/core/tray.js';
-import { SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME } from '../src/core/labels.js';
+import { SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME, TEST_LABEL, SSH_OPTIONS_LABEL } from '../src/core/labels.js';
+import { classifySshError } from '../src/core/ssherror.js';
 import * as viewmodel from '../src/ui/viewmodel.js';
 
 const html = readFileSync(new URL('../src/ui/index.html', import.meta.url), 'utf8');
@@ -29,6 +30,19 @@ test('labels: toolbar buttons, tray items and the renderer module share one name
   assert.equal(sub.find((i) => i.action === 'startRelay').label, RELAY_LABEL);
   assert.equal(viewmodel.SETUP_LABEL, SETUP_LABEL);
   assert.equal(viewmodel.RELAY_LABEL, RELAY_LABEL);
+});
+
+test('labels: the ssh guidance names the SSH options field, and Test Connection, by the shared constants (BBR-46)', () => {
+  assert.equal(TEST_LABEL, 'Test Connection');
+  assert.equal(SSH_OPTIONS_LABEL, 'SSH options');
+  // The form's own button and field label, which have no toolbar icon.
+  assert.equal(html.match(/id="btnTest"[^>]*>([^<]*)</)?.[1], TEST_LABEL);
+  assert.equal(html.match(/<label class="label" for="fOpts">([^<]*)<\/label>/)?.[1], `${SSH_OPTIONS_LABEL}:`);
+  assert.ok(classifySshError('u@h: Permission denied (publickey).').text.includes(`in ${SSH_OPTIONS_LABEL}.`));
+  assert.equal(viewmodel.TEST_LABEL, TEST_LABEL);
+  assert.equal(viewmodel.SSH_OPTIONS_LABEL, SSH_OPTIONS_LABEL);
+  // Test Connection's advice that names Set Up Host reads it from labels.js too (test/sshtest.test.js pins the sentences).
+  assert.match(readFileSync(new URL('../src/core/sshtest.js', import.meta.url), 'utf8'), /\$\{SETUP_LABEL\} installs/);
 });
 
 test('labels: the extension is called OpenCode Browse where a person is told to find it', () => {

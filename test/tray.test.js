@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AGGREGATE, HOST_ACTIONS, aggregateState } from '../src/core/hosts.js';
 import { OVERALL } from '../src/core/controller.js';
-import { HostNotifier, TrayRenderer, coalesce, trayMenuModel, trayTooltip, trayView } from '../src/core/tray.js';
+import { HostNotifier, TrayRenderer, coalesce, problemLine, trayMenuModel, trayTooltip, trayView } from '../src/core/tray.js';
 
 /** A per-host snapshot in the shape Controller.snapshot() gives, for a state. */
 function host(id, overall, extra = {}) {
@@ -109,6 +109,16 @@ test('tray: a busy or unconfigured host\'s controls are disabled; warnings show 
   const blank = trayMenuModel(agg(host('host-1', 'unconfigured', { host: '' })))[2].submenu;
   assert.equal(blank[0].label, 'no ssh host');
   assert.equal(blank.find((i) => i.action === 'connect').enabled, false);
+});
+
+test('tray: a host\'s ssh guidance shows in its submenu under the destination, with no countdown, cut to a menu\'s length (BBR-46)', () => {
+  const text = 'No usable key. Load it with ssh-add, or set IdentityFile in SSH options.';
+  const sub = trayMenuModel(agg(host('dev004', 'error', { problem: { kind: 'auth', text } })))[2].submenu;
+  assert.deepEqual(sub[1], { label: `✕ ${text}`, enabled: false });
+  const plain = trayMenuModel(agg(host('dev004', 'error', { problem: null })))[2].submenu;
+  assert.ok(!plain.some((i) => String(i.label).startsWith('✕')), 'no line without a recognised failure');
+  assert.equal(problemLine({ text: 'x'.repeat(300) }).length, 160);
+  assert.ok(problemLine({ text: 'x'.repeat(300) }).endsWith('…'));
 });
 
 test('tray: an unreadable config file gets a line naming the file and the error, in the menu and the tooltip (BBR-36)', () => {

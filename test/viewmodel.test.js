@@ -8,6 +8,7 @@ import { Logger } from '../src/core/log.js';
 import {
   AGENT_INSTALL_COMMAND, DEFAULT_RELAY_PORT, DEFAULT_REMOTE_BROWSE, PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration,
   appMenuView, generalView, hostRows, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, parsePort, pickSelected, transportText, withHostSnapshot,
+  aliasOptions, aliasWarning, parseTestForm, problemBar, testResultView,
 } from '../src/ui/viewmodel.js';
 
 // Two hosts as HostManager.snapshot() reports them: A on localhost:19988, B on 127.0.0.2:19988 (BBR-21).
@@ -169,6 +170,40 @@ test('viewmodel: the Add Host form leaves a blank address to the allocator and n
   assert.deepEqual(parseHostForm({ host: '  ' }, { adding: true }), { error: 'Enter the SSH host (user@host or an ~/.ssh/config alias).', field: 'host' });
   // Editing: the id is never sent, an emptied host is allowed (the host becomes unconfigured).
   assert.deepEqual(parseHostForm({ id: 'hijack', host: '', localAddress: '127.0.0.2' }).fields, { name: '', host: '', sshOptions: [], autoConnect: false, countActions: false, localAddress: '127.0.0.2' });
+});
+
+// ---------- BBR-46: ssh guidance, Test Connection, ~/.ssh/config aliases ----------
+
+test('viewmodel: a host\'s recognised ssh failure is a bad bar naming the host; none without one', () => {
+  const text = 'No usable key. Load it with ssh-add, or set IdentityFile in SSH options.';
+  assert.deepEqual(problemBar(hostSnap('dev004', '127.0.0.1', { name: 'build', problem: { kind: 'auth', text } })), { kind: 'bad', text: `build: ${text}` });
+  assert.equal(problemBar(hostSnap('dev004', '127.0.0.1', { problem: null })), null);
+  assert.equal(problemBar(hostSnap('dev004', '127.0.0.1')), null);
+});
+
+test('viewmodel: Test Connection needs a host, takes the options and a valid remote path, and sends nothing else', () => {
+  assert.deepEqual(parseTestForm({ host: ' jon@dev004 ', sshOptions: 'Port=2222, IdentityFile=/k', remoteBrowse: '' }), {
+    fields: { host: 'jon@dev004', sshOptions: ['Port=2222', 'IdentityFile=/k'] },
+  });
+  assert.deepEqual(parseTestForm({ host: 'h', sshOptions: '', remoteBrowse: '/opt/browse' }).fields, { host: 'h', sshOptions: [], remoteBrowse: '/opt/browse' });
+  assert.equal(parseTestForm({ host: '', sshOptions: '' }).field, 'host');
+  assert.equal(parseTestForm({ host: 'h', remoteBrowse: 'relative/browse' }).field, 'remoteBrowse');
+});
+
+test('viewmodel: a test result is one bar at its worst step\'s level, with every step\'s text', () => {
+  assert.deepEqual(testResultView({ ok: true, level: 'warn', steps: [{ text: 'Logged in to h.' }, { text: 'browse is not installed yet.' }] }),
+    { kind: 'warn', text: 'Logged in to h. browse is not installed yet.' });
+  assert.deepEqual(testResultView({ ok: false, level: 'bad', steps: [{ text: 'No usable key.' }] }), { kind: 'bad', text: 'No usable key.' });
+  assert.equal(testResultView(null), null);
+});
+
+test('viewmodel: aliases become suggestions; one with a LocalForward is labelled and warned about, any case', () => {
+  const aliases = [{ alias: 'dev004', localForward: false }, { alias: 'Tunnel', localForward: true }];
+  assert.deepEqual(aliasOptions(aliases), [{ value: 'dev004', label: '' }, { value: 'Tunnel', label: 'has a LocalForward: use the plain host instead' }]);
+  assert.equal(aliasWarning(aliases, 'dev004'), null);
+  assert.equal(aliasWarning(aliases, 'jon@elsewhere'), null);
+  assert.match(aliasWarning(aliases, ' tunnel '), /^Tunnel carries a LocalForward in ~\/\.ssh\/config\. .*use the plain user@host instead/);
+  assert.deepEqual(aliasOptions(undefined), []);
 });
 
 test('viewmodel: each config refusal is shown next to the field it is about; any other error still shows', () => {

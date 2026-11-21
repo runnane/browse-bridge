@@ -12,5 +12,11 @@ export const SETUP_LABEL = 'Set Up Host';
 /** The toolbar button and tray item that runs `browse restart` on the remote host (starts the relay if it is not running). */
 export const RELAY_LABEL = 'Restart Relay';
 
+/** The host form's button that tries the ssh destination and the remote browse before anything is saved (BBR-46). */
+export const TEST_LABEL = 'Test Connection';
+
+/** The host form's field for extra `ssh -o` options (index.html shows it with a trailing colon). */
+export const SSH_OPTIONS_LABEL = 'SSH options';
+
 /** What the browse extension is called in the Chrome Web Store and on its toolbar button, since browse 0.1.5. */
 export const EXTENSION_NAME = 'OpenCode Browse';

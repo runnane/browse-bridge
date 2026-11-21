@@ -97,6 +97,31 @@ test('controller: recent connections record open, close with byte counts, and fa
   assert.equal(ctl.snapshot().connections.at(-1).id, 59);
 });
 
+test('controller: a status poll that ssh refused carries the guidance; the log keeps ssh\'s line; success clears it', async () => {
+  const logger = new Logger();
+  const ctl = new Controller({ config: normalizeConfig({ host: 'dev004', localAddress: '127.0.0.2' }), logger });
+  const answers = [
+    { code: 255, signal: null, stdout: '', stderr: 'Host key verification failed.\n', timedOut: false },
+    { code: 1, signal: null, stdout: '', stderr: 'browse: relay not running\n', timedOut: false },
+    { code: 0, signal: null, stdout: JSON.stringify({ relay: { running: true, endpoint: 'http://127.0.0.1:19988' }, autoUpdate: { effective: 'off' } }), stderr: '', timedOut: false },
+  ];
+  ctl.transport = () => ({ browse: async () => answers.shift() });
+  ctl.schedulePoll = () => {};
+  ctl.wanted = true; // as connect() leaves it, without a tunnel or proxy
+  await ctl.pollNow();
+  let snap = ctl.snapshot();
+  assert.equal(snap.statusError, 'This host\'s key is not in known_hosts yet. Run ssh dev004 once in a terminal and accept it.');
+  assert.deepEqual(snap.problem, { kind: 'hostKeyUnknown', text: snap.statusError });
+  assert.ok(logger.ring.some((e) => e.message.startsWith('browse status failed: Host key verification failed.')), 'the raw line is logged');
+  await ctl.pollNow();
+  snap = ctl.snapshot();
+  assert.equal(snap.statusError, 'browse: relay not running', 'anything else is the raw last line, as before');
+  assert.equal(snap.problem, null, 'and is no ssh guidance');
+  await ctl.pollNow();
+  assert.deepEqual([ctl.snapshot().statusError, ctl.snapshot().problem], [null, null]);
+  ctl.wanted = false;
+});
+
 test('controller: a taken pairing address is an error state with a reason, not "Stopped"', async (t) => {
   const blocker = net.createServer();
   await new Promise((r) => blocker.listen(0, '127.0.0.2', r));
@@ -272,16 +297,23 @@ test('tunnel: ssh exit → retrying with the reason, then respawns; stop kills o
   sup.on('state', (s) => states.push(s.state));
   sup.start();
   assert.equal(children.length, 1);
-  children[0].stderr.emit('data', 'Permission denied (publickey).\n');
+  const logs = [];
+  sup.on('log', (l) => logs.push(l.message));
+  children[0].stderr.emit('data', 'jon@dev004: Permission denied (publickey).\n');
   children[0].emit('exit', 255, null);
   assert.equal(sup.state, 'retrying');
-  assert.match(sup.detail, /exit 255: Permission denied/);
+  // The detail says what to do (BBR-46); the log keeps the line ssh printed.
+  assert.match(sup.detail, /^exit 255: No usable key\. Load it with ssh-add, or set IdentityFile in SSH options\. — retry in 1s$/);
+  assert.deepEqual(sup.problem, { kind: 'auth', text: 'No usable key. Load it with ssh-add, or set IdentityFile in SSH options.' });
+  assert.ok(logs.includes('tunnel ended (exit 255): jon@dev004: Permission denied (publickey).'), logs.join('\n'));
   t.mock.timers.tick(1000);
   assert.equal(children.length, 2, 'respawned after the first backoff');
+  assert.equal(sup.problem?.kind, 'auth', 'the guidance stays while the retry starts, so it does not flicker');
   sup.stop();
   assert.equal(children[1].killedWith, 'SIGTERM');
   assert.equal(children[0].killedWith, null, 'never signals a process it no longer owns');
   assert.equal(sup.state, 'stopped');
+  assert.equal(sup.problem, null);
   t.mock.timers.tick(60_000);
   assert.equal(children.length, 2, 'no respawn after stop');
   assert.deepEqual(states.slice(0, 3), ['starting', 'retrying', 'starting']);

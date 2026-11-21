@@ -97,18 +97,17 @@ function controlOpts(controlDir) {
   ];
 }
 
+/** argv for `ssh <host> <command>`, where `command` is one remote shell string the caller has already quoted. */
+export function sshCommandArgs(cfg, command, controlDir = null) {
+  return [...baseSshOptions(cfg), ...controlOpts(controlDir), '--', cfg.host, command];
+}
+
 /** argv for `ssh <host> <browse> <args…>`: the remote command is one string, every part quoted. */
 export function sshBrowseArgs(cfg, args, controlDir = null) {
-  return [
-    ...baseSshOptions(cfg), ...controlOpts(controlDir), '--', cfg.host,
-    [shQuotePath(cfg.remoteBrowse), ...args.map(shQuote)].join(' '),
-  ];
+  return sshCommandArgs(cfg, [shQuotePath(cfg.remoteBrowse), ...args.map(shQuote)].join(' '), controlDir);
 }
 
 /** argv for `ssh <host> bash -s -- <args…>` with the script on stdin. */
 export function sshScriptArgs(cfg, args, controlDir = null) {
-  return [
-    ...baseSshOptions(cfg), ...controlOpts(controlDir), '--', cfg.host,
-    ['bash', '-s', '--', ...args.map(shQuote)].join(' '),
-  ];
+  return sshCommandArgs(cfg, ['bash', '-s', '--', ...args.map(shQuote)].join(' '), controlDir);
 }
