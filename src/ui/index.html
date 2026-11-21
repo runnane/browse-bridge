@@ -503,7 +503,12 @@
       <p class="muted">Built on <button class="link" data-link="browse">browse</button> by the OpenCode team (MIT). browse-bridge is an independent
         project, not affiliated with or endorsed by OpenCode, Anomaly or the browse project.</p>
     </div>
-    <div class="dlg-buttons"><button class="btn default" id="btnAboutClose" autofocus>Close</button></div>
+    <div class="dlg-buttons">
+      <label class="check left"><input type="checkbox" id="diagHide" checked>Hide host names</label>
+      <span class="muted" id="diagStatus" role="status"></span>
+      <button class="btn" id="btnCopyDiag" title="Copy versions, host states, config and recent log to the clipboard, for a bug report">Copy Diagnostics</button>
+      <button class="btn default" id="btnAboutClose" autofocus>Close</button>
+    </div>
   </dialog>
 
   <script type="module" src="renderer.js"></script>

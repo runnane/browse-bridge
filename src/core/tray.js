@@ -64,6 +64,8 @@ export function trayMenuModel(agg, { autostart = false, version = '', configFail
     // Both open a dialog in the window (BBR-32).
     { label: 'Help', action: 'showHelp' },
     { label: 'About browse-bridge…', action: 'showAbout' },
+    // Puts a bug-report bundle on the clipboard, always with host names hidden (BBR-47).
+    { label: 'Copy diagnostics', action: 'copyDiagnostics' },
     { type: 'separator' },
     ...(version ? [{ label: version, enabled: false }] : []),
     { label: 'Quit', action: 'quit' },
