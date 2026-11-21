@@ -57,6 +57,9 @@ export function pickSelected(hosts, selectedId) {
 }
 
 /** The snapshot of one host from a HostManager snapshot ({ hosts: [...] }). */
+/** Shared with core (tray, controller) so a message and the control it names cannot drift; see core/labels.js. */
+export { SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME } from '../core/labels.js';
+
 /**
  * A host config's pairing address, as config.js pairingAddress() gives it
  * (the renderer cannot import config.js, which needs node:fs; a test pins the two together).

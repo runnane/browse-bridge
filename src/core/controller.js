@@ -5,6 +5,7 @@ import { createCountingProxy } from './proxy.js';
 import { summarizeCounts } from './actions.js';
 import { pairingAddress } from './config.js';
 import { TunnelSupervisor } from './tunnel.js';
+import { SETUP_LABEL } from './labels.js';
 import { SETUP_SCRIPT, parsePairOutput, parseSetupOutput, summarizeStatus, verifySetup } from './browse.js';
 
 /**
@@ -274,7 +275,7 @@ export class Controller extends EventEmitter {
 
   statusWarnings(s) {
     const w = [];
-    if (s.autoUpdate !== 'off') w.push(`auto-update is ${s.autoUpdate ?? 'unmeasured'} — run "Set up remote"`);
+    if (s.autoUpdate !== 'off') w.push(`auto-update is ${s.autoUpdate ?? 'unmeasured'} — click "${SETUP_LABEL}"`);
     if (s.relayVersion && s.relayVersion !== this.cfg.browseVersion) w.push(`browse ${s.relayVersion} running, ${this.cfg.browseVersion} pinned`);
     return w;
   }

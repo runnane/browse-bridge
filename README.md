@@ -34,7 +34,7 @@ the link (which browse itself does not encrypt) rides inside SSH.
 - **Tunnel, kept up:** `ssh -N -L` with `BatchMode`, `ExitOnForwardFailure`,
   keepalives, and reconnect with backoff (1 s → 30 s). Follows the relay if it
   moves port.
-- **Set up remote host:** one button installs browse **pinned** (0.1.4) into
+- **Set Up Host:** one button installs browse **pinned** (0.1.4) into
   `~/.local` on the remote (no sudo), turns auto-update **off** persistently,
   binds the relay to `127.0.0.1`, restarts it — then **verifies at the remote**
   (version, `autoUpdate.effective`, and that the relay port listens on loopback
@@ -82,7 +82,7 @@ the link (which browse itself does not encrypt) rides inside SSH.
   no host (grey dash): each differs by **shape** as well as colour. The tooltip
   names each host and its state in words (`dev004: Connected · dev005: Tunnel
   down`). Each host has a submenu with its own controls (Connect/Disconnect,
-  Pair browser…, Start relay, Set up remote host, Show logs); Show window, Open
+  Pair browser…, Restart Relay, Set Up Host, Show logs); Show window, Open
   log file, Start at login, Help, About browse-bridge… and Quit stay top level. Every control is in the
   menu (Linux tray clicks are unreliable). Desktop notification, naming the
   host, when a host connects or disconnects. Optional start at login (XDG
@@ -122,8 +122,8 @@ Use the **plain** host (e.g. `jon@dev004`), not an alias that carries a
 1. In the window, set **SSH host** (`jon@dev004` or an `~/.ssh/config` alias)
    on the Settings tab and **Apply**. For another host, use **Add Host…**
    under the host list.
-2. **Set up remote host** → expect "Remote verified".
-3. Install the browse extension in Edge/Chrome (Chrome Web Store; in Edge
+2. **Set Up Host** → expect "Host verified".
+3. Install the **OpenCode Browse** extension in Edge/Chrome (Chrome Web Store; in Edge
    allow extensions from other stores).
 4. **Pair browser** → in the extension: *Options → advanced / Pair with a
    code*, enter the code and the address `localhost:19988`, click Connect.
@@ -242,8 +242,8 @@ what browse already does; thanks to its authors for building it.
   tool. It is not affiliated with, endorsed by, sponsored by or supported by
   OpenCode, Anomaly or the browse project. "browse" and "OpenCode" are used
   only to name the software this app works with; they belong to their owners.
-- **Not bundled.** This repository contains no browse code or assets. **Set up
-  remote host** installs the pinned `@opencode/browse` release from the npm
+- **Not bundled.** This repository contains no browse code or assets. **Set Up
+  Host** installs the pinned `@opencode/browse` release from the npm
   registry onto your remote host, and the extension comes from the Chrome Web
   Store; both are distributed by their authors under their own license.
 - **Where to report problems.** Bugs in browse itself (the MCP server, relay,

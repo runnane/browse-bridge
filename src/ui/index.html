@@ -201,7 +201,7 @@
     <button class="tb" id="btnSetup" title="Install the pinned browse, turn auto-update off, bind the relay to loopback, and verify">
       <svg viewBox="0 0 16 16"><path d="M10.5 2.5a3 3 0 0 0-3.9 3.9L2.5 10.5l3 3 4.1-4.1a3 3 0 0 0 3.9-3.9l-1.8 1.8-1.7-.4-.4-1.7z"/></svg><span>Set Up Host</span>
     </button>
-    <button class="tb" id="btnRelay" title="Start the relay on the remote host (agents normally start it themselves)">
+    <button class="tb" id="btnRelay" title="Restart the relay on the remote host (starts it if it is not running)">
       <svg viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v2.8h-2.8"/></svg><span>Restart Relay</span>
     </button>
     <div class="spacer"></div>
@@ -220,7 +220,7 @@
     <div class="sidebar-title">Hosts</div>
     <ul class="hostlist" id="hostList" role="listbox" aria-label="Hosts"></ul>
     <div class="sidebar-buttons">
-      <button class="tb" id="btnAddHost" title="Add another remote host; it gets the next free local port pair">
+      <button class="tb" id="btnAddHost" title="Add another remote host; it gets the next free loopback address (127.0.0.N) on the relay's port">
         <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg><span>Add Host…</span>
       </button>
     </div>
@@ -347,7 +347,7 @@
       <div class="frame copyrow"><span class="code selectable" id="pairCode"></span><button class="btn" id="btnCopyCode">Copy</button></div>
       <div class="frame copyrow" style="margin-top:6px"><span class="mono selectable" id="pairAddr"></span><button class="btn" id="btnCopyAddr">Copy</button></div>
       <ol>
-        <li>In Edge or Chrome, open <b>Extensions → browse → Options</b>.</li>
+        <li>In Edge or Chrome, open <b>Extensions → OpenCode Browse → Options</b>.</li>
         <li>Expand <b>advanced</b> (or click <b>Pair with a code</b>).</li>
         <li>Enter the code and the relay address above, then click <b>Connect</b>.</li>
       </ol>
@@ -383,7 +383,7 @@
           The app never prompts for a password: use key-based ssh (an agent, or <span class="mono">IdentityFile</span> under SSH options).</li>
         <li>Click <b>Set Up Host</b>. It installs the pinned browse (<span class="mono" id="helpBrowseVersion"></span>) on the remote, turns auto-update off,
           binds the relay to loopback and checks all of it there. Expect a "Host verified" message.</li>
-        <li>Install the browse extension in Edge or Chrome.</li>
+        <li>Install the <b>OpenCode Browse</b> extension in Edge or Chrome.</li>
         <li>Click <b>Pair Browser…</b> and enter the code and the address it shows in the extension's options
           (<b>advanced</b> or <b>Pair with a code</b>), then click <b>Connect</b> there.</li>
         <li>The host shows <b>Connected</b>. Agents on the remote use it through the <span class="mono">browse</span> MCP server.</li>
@@ -401,7 +401,7 @@
         <dt data-state="ready">Connected</dt><dd>Tunnel up, relay running, a browser connected.</dd>
         <dt data-state="warning">Connected, with warnings</dt><dd>Working, but auto-update is on or a browse version other than the pinned one is running. The warning shows in a bar above the tabs; <b>Set Up Host</b> fixes both.</dd>
         <dt data-state="needsPairing">Browser not connected</dt><dd>The bridge is up but no browser is connected: click <b>Pair Browser…</b>, or point the extension at this host's address.</dd>
-        <dt data-state="relayIdle">Relay not running</dt><dd>Agents start the relay when they need it; <b>Restart Relay</b> starts it by hand.</dd>
+        <dt data-state="relayIdle">Relay not running</dt><dd>Since browse 0.1.4 the relay no longer shuts itself down when idle, so this means something went wrong: it crashed, was stopped, or the host rebooted. Click <b>Restart Relay</b>; if it does not come back, the Log tab (relay log) says why.</dd>
         <dt data-state="connecting">Connecting</dt><dd>The tunnel is starting.</dd>
         <dt data-state="error">Tunnel down</dt><dd>ssh failed or dropped; it retries with backoff. The Log tab says why.</dd>
         <dt data-state="stopped">Stopped</dt><dd>Not connected: click <b>Connect</b>.</dd>
