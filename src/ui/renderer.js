@@ -1,7 +1,7 @@
 /* global bridge */
 import {
   AGGREGATE_CLASS, AGGREGATE_GLYPH, GLYPH, actionsView, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, fmtRate,
-  RELAY_LABEL, generalView, hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, pickSelected,
+  RELAY_LABEL, appMenuView, generalView, hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, pickSelected,
   transportText, withHostSnapshot,
 } from './viewmodel.js';
 
@@ -75,6 +75,7 @@ async function openGeneral() {
   // The tray's Start at login item may have changed it since.
   try {
     $('autostart').checked = await bridge.autostart();
+    await fillAppMenu();
   } catch (err) {
     addFlash('bad', cleanError(err.message));
   }
@@ -683,8 +684,8 @@ function fillGeneral() {
 }
 
 $('general').addEventListener('input', (ev) => {
-  // Start at login saves on change, on its own; it never makes the form dirty.
-  if (ev.target.id === 'autostart') return;
+  // Start at login and Show in application menu save on change, on their own; they never make the form dirty.
+  if (ev.target.id === 'autostart' || ev.target.id === 'appMenu') return;
   setGeneralDirty(true);
 });
 $('general').addEventListener('submit', async (ev) => {
@@ -709,6 +710,15 @@ $('general').addEventListener('keydown', (ev) => {
 $('btnGeneralReset').onclick = () => fillGeneral();
 $('btnOpenConfig').onclick = () => bridge.openConfigFile().catch((err) => addFlash('bad', cleanError(err.message)));
 $('autostart').addEventListener('change', (ev) => bridge.setAutostart(ev.target.checked));
+$('appMenu').addEventListener('change', (ev) => bridge.setAppMenu(ev.target.checked).catch((err) => addFlash('bad', cleanError(err.message))));
+
+/** Show in application menu: hidden for a packaged build; the box follows the entry on disk. */
+async function fillAppMenu() {
+  const v = appMenuView(await bridge.appMenu());
+  $('appMenuRow').hidden = v.hidden;
+  $('appMenuNote').hidden = v.hidden;
+  $('appMenu').checked = v.checked;
+}
 
 $('btnRemoveHost').onclick = () => {
   const s = selected();
@@ -770,6 +780,7 @@ const ready = (async () => {
   fillGeneral();
   if (selected()?.overall === 'unconfigured' && !state.configFailure) showTab('settings');
   $('autostart').checked = await bridge.autostart();
+  await fillAppMenu();
   $('sbVersion').textContent = await bridge.version();
   fillAbout(await bridge.about());
   for (const e of await bridge.log()) appLog.push(e);

@@ -312,6 +312,16 @@ export function generalView(app) {
 }
 
 /**
+ * The "Show in application menu" checkbox from main's { packaged, enabled }.
+ * A packaged build ships its own menu entry, so the checkbox is hidden there
+ * (and before main has answered).
+ */
+export function appMenuView(info) {
+  if (!info || info.packaged) return { hidden: true, checked: false };
+  return { hidden: false, checked: Boolean(info.enabled) };
+}
+
+/**
  * Which form field a config error is about, so it is shown next to that
  * field. Matches the messages normalizeAppConfig throws; anything else is
  * shown on the form as a whole (field null), never dropped.
