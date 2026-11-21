@@ -232,6 +232,21 @@ export function withHostEdits(app, id, fields) {
 }
 
 /**
+ * App-wide settings the window may change (BBR-45). `browseVersion` is not
+ * one: the window shows the pin read-only, so no ipc call can move it.
+ */
+export const APP_EDITABLE_KEYS = Object.freeze(['pollSeconds']);
+
+/**
+ * The app config with app-wide fields replaced (e.g. by the General page).
+ * Only APP_EDITABLE_KEYS are taken from `fields`; the hosts stay. Not
+ * validated here: saveConfig / normalizeAppConfig do that.
+ */
+export function withAppEdits(app, fields) {
+  return { ...app, ...pick(fields ?? {}, APP_EDITABLE_KEYS) };
+}
+
+/**
  * A host id from a name or an ssh destination ("jon@dev005:22" → "dev005"),
  * made unique against `taken` with a "-2", "-3", … suffix. Empty when nothing
  * usable is left, so the config's own "host-N" applies.

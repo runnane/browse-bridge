@@ -46,7 +46,15 @@ signal that pid. Never kill by name. A leaked ssh ControlMaster shows up as
   the render. It writes `<prefix>-<tab>.png` and `<prefix>.json` (any console
   errors are listed there). With two or more hosts configured it also selects
   the second host and writes `<prefix>-host2.png`, `<prefix>-host2-log.png`
-  and `second` (that render's text) in the JSON. `BB_SMOKE_INVALID=1` submits
+  and `second` (that render's text) in the JSON. Then it opens **General**
+  (BBR-45) and writes `<prefix>-general.png`, with `general` in the JSON:
+  `shown`, `tabsHidden`, `text`, `pollSeconds` and `autostart` (`text` is
+  innerText, which leaves input values out, so the poll field's value is its
+  own key). Next it selects the first host's Settings, expands the
+  **Advanced** section and writes `<prefix>-advanced.png`, with `advanced`
+  in the JSON: `host`, `collapsedByDefault` (true unless something opened it
+  before the hook), `open`, `text`, `remotePort`, `remoteBrowse` and
+  `transport`. `BB_SMOKE_INVALID=1` submits
   an Add Host form whose id clashes with the first host's and records the
   inline error under `invalid`; the config refuses it before writing. Last,
   it opens the Help and About dialogs, writes `<prefix>-help.png` and

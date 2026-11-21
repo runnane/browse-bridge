@@ -45,7 +45,11 @@ the link (which browse itself does not encrypt) rides inside SSH.
   **Add Host…** gives a new host the next free loopback address (or the one you type),
   **Remove Host…** (in Settings) disconnects and drops one, and a refused
   setting (an address another host uses, a duplicate id, a bad ssh destination) is
-  shown next to the field it is about.
+  shown next to the field it is about. A host's relay port and remote browse
+  path are under **Advanced** in its Settings, collapsed by default.
+- **General:** below the host list, the settings for the whole app. These are
+  start at login, the status poll interval and the pinned browse version, shown
+  read-only. **Open Config File** opens `config.json` for anything else.
 - **Pair browser:** asks the selected host's relay for a one-time code and
   shows it with **that host's** address to enter (`localhost:19988` for the
   first host, `127.0.0.2:19988` for the second, …). Codes never reach the log.
@@ -86,7 +90,7 @@ the link (which browse itself does not encrypt) rides inside SSH.
   log file, Start at login, Help, About browse-bridge… and Quit stay top level. Every control is in the
   menu (Linux tray clicks are unreliable). Desktop notification, naming the
   host, when a host connects or disconnects. Optional start at login (XDG
-  autostart, which Plasma reads).
+  autostart, which Plasma reads), in the tray menu and on the General page.
 
 - **Help and About:** **Help** (toolbar, tray, or <kbd>F1</kbd>) explains first
   run, several hosts, every state and the shortcuts. **About** shows the running
@@ -136,7 +140,7 @@ Agents on the remote use it through the `browse` MCP server
 
 ## Config
 
-`~/.config/browse-bridge/config.json` (written by the Settings form) holds a
+`~/.config/browse-bridge/config.json` (written by the Settings form and the General page) holds a
 **list of hosts**, each bridged on its own at the same time, plus two app-wide
 settings:
 
@@ -159,26 +163,35 @@ value), the app keeps it: it copies the file to
 menu, and saves nothing over it. Fix the file and click **Reload**, or click
 **Start Over** to replace it with one empty host.
 
-App-wide:
+The *in the window* column says where each key is edited. A key marked
+*file only* is changed by editing config.json: **Open Config File** on the
+General page opens it.
 
-| key | default | meaning |
-| --- | --- | --- |
-| `browseVersion` | 0.1.4 | pinned version setup installs and checks |
-| `pollSeconds` | 10 | status poll interval |
+App-wide (the **General** page, below the host list):
+
+| key | default | in the window | meaning |
+| --- | --- | --- | --- |
+| `browseVersion` | 0.1.4 | General, read-only | pinned version setup installs and checks |
+| `pollSeconds` | 10 | General | status poll interval in seconds (2 to 3600 in the window); a change reconnects no host |
+
+Start at login is on the General page too. It is not a config key: it is the
+XDG autostart entry, and it saves as soon as you tick it.
 
 Per host (each entry in `hosts`):
 
-| key | default | meaning |
-| --- | --- | --- |
-| `id` | `host-1`, `host-2`, … | lower-case id; tags that host's log lines |
-| `name` | — | display name |
-| `host` | — | ssh destination |
-| `localAddress` | 127.0.0.1, 127.0.0.2, … | the extension pairs with `<localAddress>:<relay port>` (127.0.0.1 shows as `localhost`) |
-| `innerPort` | 19989, 19991, … | ssh's forward port on 127.0.0.1 (internal) |
-| `remotePort` | 19988 | relay port until status reports the real one |
-| `remoteBrowse` | `$HOME/.local/bin/browse` | browse on the remote |
-| `autoConnect` | true | connect when the app starts |
-| `sshOptions` | `[]` | extra `-o Key=value` options |
+| key | default | in the window | meaning |
+| --- | --- | --- | --- |
+| `id` | `host-1`, `host-2`, … | Settings, on Add Host only | lower-case id; tags that host's log lines |
+| `name` | — | Settings | display name |
+| `host` | — | Settings | ssh destination |
+| `localAddress` | 127.0.0.1, 127.0.0.2, … | Settings | the extension pairs with `<localAddress>:<relay port>` (127.0.0.1 shows as `localhost`) |
+| `innerPort` | 19989, 19991, … | file only | ssh's forward port on 127.0.0.1 (internal) |
+| `remotePort` | 19988 | Settings → Advanced | relay port until status reports the real one |
+| `remoteBrowse` | `$HOME/.local/bin/browse` | Settings → Advanced | browse on the remote. Set Up Host installs browse only at the default path; anywhere else it must already be the pinned version |
+| `transport` | `ssh` | Settings → Advanced, read-only | `ssh`, or `local` to run browse on this machine (tests) |
+| `autoConnect` | true | Settings | connect when the app starts |
+| `countActions` | false | Settings | count the commands the relay sends the browser (see above) |
+| `sshOptions` | `[]` | Settings | extra `-o Key=value` options |
 
 **Why an address per host, not a port per host:** the browse extension binds
 its pairing proof to the port it dials, and the relay checks it against its own

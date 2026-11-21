@@ -4,7 +4,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
 
 contextBridge.exposeInMainWorld('bridge', {
-  // { overall, label, hosts: [per-host snapshot, …], configFailure: null | { path, message, backup, backupError } }
+  // { overall, label, hosts: [per-host snapshot, …], configFailure: null | { path, message, backup, backupError },
+  //   app: { pollSeconds, browseVersion, configPath } }
   state: invoke('state'),
   // An unreadable config file (BBR-36): read it again, or replace it with one empty host (the old bytes are kept).
   reloadConfig: invoke('reloadConfig'),
@@ -27,6 +28,9 @@ contextBridge.exposeInMainWorld('bridge', {
   saveConfig: invoke('saveConfig'),
   addHost: invoke('addHost'),
   removeHost: invoke('removeHost'),
+  // The General page (BBR-45): saveAppSettings({ pollSeconds }), and open config.json in the desktop's editor.
+  saveAppSettings: invoke('saveAppSettings'),
+  openConfigFile: invoke('openConfigFile'),
   copy: invoke('copy'),
   openLogFile: invoke('openLogFile'),
   autostart: invoke('autostart'),

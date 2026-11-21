@@ -142,6 +142,15 @@
   .hostsub { grid-column: 2; font-size: 9pt; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hostsub.mono { font-size: 8.5pt; }
   .sidebar-buttons { display: flex; padding: 4px; border-top: 1px solid var(--frame); }
+  /* App-wide entries under the host list (BBR-45): drawn like a host row, so the selection reads the same */
+  .navlist { flex: none; margin: 0; padding: 2px 4px 6px; list-style: none; }
+  .navlist .hostrow { align-items: center; }
+
+  /* The host form's Advanced disclosure (BBR-45), collapsed by default */
+  details.advanced { margin-top: 14px; }
+  details.advanced > summary { color: var(--muted); margin-bottom: 8px; }
+  details.advanced > summary:hover { color: var(--text); }
+  details.advanced > summary:focus-visible { outline: 1px solid var(--hl); outline-offset: 1px; }
   @media (max-width: 700px) { .sidebar { width: 150px; } }
 
   /* Inline form errors (next to the field they are about) */
@@ -219,6 +228,12 @@
   <nav class="sidebar" aria-label="Hosts">
     <div class="sidebar-title">Hosts</div>
     <ul class="hostlist" id="hostList" role="listbox" aria-label="Hosts"></ul>
+    <div class="sidebar-title">App</div>
+    <ul class="navlist" role="listbox" aria-label="App settings">
+      <li class="hostrow" id="navGeneral" tabindex="0" role="option" aria-selected="false" title="App-wide settings: start at login, status poll interval, the pinned browse version, the config file">
+        <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4"/></svg><span class="hostname">General</span>
+      </li>
+    </ul>
     <div class="sidebar-buttons">
       <button class="tb" id="btnAddHost" title="Add another remote host; it gets the next free loopback address (127.0.0.N) on the relay's port">
         <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg><span>Add Host…</span>
@@ -317,16 +332,55 @@
           <span></span><div class="hint"><div class="muted">Extra -o options, comma separated</div><div class="field-error" id="errSshOptions" hidden></div></div>
           <span class="label">Startup:</span>
           <span><label class="check"><input type="checkbox" name="autoConnect">Connect this host when the app starts</label></span>
-          <span></span>
-          <span><label class="check"><input type="checkbox" id="autostart">Start browse-bridge at login</label></span>
+          <span></span><div class="hint"><div class="muted">Starting browse-bridge itself at login is under General, below the host list</div></div>
           <span class="label">Traffic:</span>
           <span><label class="check"><input type="checkbox" name="countActions">Count browser actions</label></span>
           <span></span><div class="hint"><div class="muted">Reads only the names of the commands the relay sends (click, navigate, …), never their contents</div></div>
         </div>
+        <details class="advanced" id="advanced">
+          <summary>Advanced</summary>
+          <div class="form" style="align-items:center">
+            <label class="label" for="fRemotePort">Relay port:</label>
+            <input type="text" id="fRemotePort" name="remotePort" inputmode="numeric" spellcheck="false" placeholder="19988" style="width:90px">
+            <span></span><div class="hint"><div class="muted">The relay's port on the remote host until its status reports the real one; the extension pairs on the same port. 19988 unless the remote moved it</div><div class="field-error" id="errRemotePort" hidden></div></div>
+            <label class="label" for="fRemoteBrowse">Remote browse path:</label>
+            <input type="text" id="fRemoteBrowse" name="remoteBrowse" spellcheck="false" placeholder="$HOME/.local/bin/browse">
+            <span></span><div class="hint"><div class="muted">Set Up Host installs and upgrades browse only at $HOME/.local/bin/browse. At any other path browse must already be the pinned version: setup checks it there and installs nothing. Empty means the default</div><div class="field-error" id="errRemoteBrowse" hidden></div></div>
+            <span class="label">Transport:</span>
+            <span class="value mono" id="fTransport">ssh</span>
+            <span></span><div class="hint"><div class="muted">Shown here, not edited: local (browse on this machine, for tests) is set in the config file only</div></div>
+          </div>
+        </details>
         <div class="buttons">
           <button type="button" class="btn left" id="btnRemoveHost" title="Disconnect this host and remove it from the list">Remove Host…</button>
           <button type="button" class="btn" id="btnReset">Reset</button>
           <button type="submit" class="btn default" id="btnApply" title="Ctrl+Enter">Apply</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- App-wide settings (BBR-45), reached from General under the host list; the tabs above are per host and hide while it shows. -->
+    <section class="page" id="generalPage" role="region" aria-label="General" hidden>
+      <form id="general" novalidate>
+        <div class="form-title">General</div>
+        <div class="msg bad" id="generalError" hidden style="margin-bottom:10px"></div>
+        <div class="form" style="align-items:center" id="generalForm">
+          <span class="label">Startup:</span>
+          <span><label class="check"><input type="checkbox" id="autostart">Start browse-bridge at login</label></span>
+          <span></span><div class="hint"><div class="muted">Takes effect at once. It starts in the tray; each host's own start-up choice is in its Settings</div></div>
+          <label class="label" for="fPoll">Status poll interval:</label>
+          <span><input type="text" id="fPoll" name="pollSeconds" inputmode="numeric" spellcheck="false" placeholder="10" style="width:90px"> seconds</span>
+          <span></span><div class="hint"><div class="muted">How often each host's relay status is checked, 2 to 3600; applies to every host without reconnecting</div><div class="field-error" id="errPollSeconds" hidden></div></div>
+          <span class="label">Pinned browse:</span>
+          <span class="value mono selectable" id="gBrowseVersion">—</span>
+          <span></span><div class="hint"><div class="muted" id="gPinNote"></div></div>
+          <span class="label">Config file:</span>
+          <span class="value mono selectable" id="gConfigPath">—</span>
+          <span></span><span><button type="button" class="btn" id="btnOpenConfig" title="Open config.json in the desktop's editor, for anything this window does not edit">Open Config File</button></span>
+        </div>
+        <div class="buttons">
+          <button type="button" class="btn" id="btnGeneralReset">Reset</button>
+          <button type="submit" class="btn default" id="btnGeneralApply" title="Ctrl+Enter">Apply</button>
         </div>
       </form>
     </section>
@@ -415,7 +469,8 @@
         <li><b>Status</b>: tunnel, relay, browser, agent tabs and auto-update for the selected host.</li>
         <li><b>Traffic</b>: bytes, rate and connections; with <b>Count browser actions</b> ticked in Settings, the names of the commands sent to the browser (never their contents).</li>
         <li><b>Log</b>: this host's lines, all hosts, or the remote relay log. <b>Open Log File</b> opens the full log.</li>
-        <li><b>Settings</b>: the selected host's ssh destination, address and options, and <b>Start browse-bridge at login</b>.</li>
+        <li><b>Settings</b>: the selected host's ssh destination, address and options. Its relay port and remote browse path are under <b>Advanced</b>.</li>
+        <li><b>General</b>, below the host list: settings for the whole app. These are <b>Start browse-bridge at login</b>, the <b>Status poll interval</b> and the pinned browse version. <b>Open Config File</b> opens config.json for anything the window does not edit.</li>
       </ul>
       <p>Closing the window keeps the tunnels running in the tray. The tray menu has each host's own controls and <b>Quit</b>.</p>
 

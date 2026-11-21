@@ -1,5 +1,8 @@
 import { EventEmitter } from 'node:events';
-import { hostConfig, normalizeAppConfig, withHostAdded, withHostEdits, withHostRemoved } from './config.js';
+import { hostConfig, normalizeAppConfig, withAppEdits, withHostAdded, withHostEdits, withHostRemoved } from './config.js';
+
+/** What a controller is rebuilt for: its effective config without the poll interval, which it reads at each poll. */
+const restartKey = (cfg) => JSON.stringify({ ...cfg, pollSeconds: undefined });
 import { Controller } from './controller.js';
 
 /**
@@ -107,8 +110,16 @@ export class HostManager extends EventEmitter {
     const clean = normalizeAppConfig(config);
     const next = new Map(clean.hosts.map((h) => [h.id, hostConfig(clean, h.id)]));
     const removed = [...this.entries.keys()].filter((id) => !next.has(id));
-    const changed = [...next.keys()].filter((id) => this.entries.has(id) && this.entries.get(id).key !== JSON.stringify(next.get(id)));
+    const changed = [...next.keys()].filter((id) => this.entries.has(id) && this.entries.get(id).key !== restartKey(next.get(id)));
     const added = [...next.keys()].filter((id) => !this.entries.has(id));
+    // A host that differs only in the poll interval keeps its controller and tunnel. Its pending poll
+    // timer is re-armed, so a shorter interval applies now, not after the old one runs out.
+    for (const [id, cfg] of next) {
+      const entry = this.entries.get(id);
+      if (!entry || changed.includes(id) || entry.ctl.cfg.pollSeconds === cfg.pollSeconds) continue;
+      entry.ctl.cfg = cfg;
+      entry.ctl.schedulePoll();
+    }
 
     const wasWanted = new Map();
     for (const id of [...removed, ...changed]) {
@@ -131,7 +142,7 @@ export class HostManager extends EventEmitter {
         spawnImpl: this.spawnImpl,
       });
       ctl.on('change', (snap) => this.emit('change', snap));
-      this.entries.set(id, { ctl, key: JSON.stringify(cfg) });
+      this.entries.set(id, { ctl, key: restartKey(cfg) });
       this.logger.info('config', `host ${id} ${changed.includes(id) ? 'reconfigured' : 'added'}`);
       if (ctl.configured && (wasWanted.get(id) || cfg.autoConnect)) toConnect.push(ctl);
       ctl.changed();
@@ -164,6 +175,18 @@ export class HostManager extends EventEmitter {
     const clean = save(withHostAdded(this.config, fields));
     await this.apply(clean);
     return hostConfig(clean, clean.hosts.at(-1).id);
+  }
+
+  /**
+   * Replace app-wide settings (from the window's General page), persist with
+   * `save` and apply. Only APP_EDITABLE_KEYS are taken. A new poll interval
+   * restarts no tunnel. Returns { pollSeconds, browseVersion }.
+   */
+  async editApp(fields, save = normalizeAppConfig) {
+    await this.queue;
+    const clean = save(withAppEdits(this.config, fields));
+    await this.apply(clean);
+    return { pollSeconds: clean.pollSeconds, browseVersion: clean.browseVersion };
   }
 
   /** Remove one host: its controller is disconnected and dropped. The last host is refused. */

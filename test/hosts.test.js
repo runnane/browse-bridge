@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hostConfig, loadConfig, normalizeAppConfig, pairingAddress, saveConfig, suggestHostId } from '../src/core/config.js';
+import { PINNED_BROWSE_VERSION, hostConfig, loadConfig, normalizeAppConfig, pairingAddress, saveConfig, suggestHostId } from '../src/core/config.js';
 import { Logger } from '../src/core/log.js';
 import { probePort } from '../src/core/proxy.js';
 import { HOST_ACTIONS, HostManager, aggregateState, runHostAction } from '../src/core/hosts.js';
@@ -366,6 +366,7 @@ function stubManager() {
       pair: call('pair', { code: 'ABCD-EF12', address: pairingAddress(config) }),
       startRelay: call('startRelay', true),
       relayLog: call('relayLog', `relay log of ${config.id}`),
+      schedulePoll: (...args) => { calls.push([config.id, 'schedulePoll', ...args]); },
       snapshot: () => ({ id: config.id, localPort: config.localPort, overall: 'stopped' }),
       changed: () => {},
     });
@@ -403,6 +404,34 @@ test('hosts: an added host that clashes is refused with the config\'s message; n
   await assert.rejects(mgr.addHost({ host: 'jon@z', innerPort: 19989 }, save), /127\.0\.0\.1:19989 is used twice/);
   assert.equal(existsSync(path), false, 'nothing written');
   assert.deepEqual(mgr.ids(), ['dev004']);
+});
+
+test('hosts: a new poll interval from General is saved and reaches every controller without restarting one (BBR-45)', async () => {
+  const { mgr, calls } = stubManager();
+  const path = join(mkdtempSync(join(tmpdir(), 'bb-app-')), 'config.json');
+  const save = (cfg) => saveConfig(path, cfg);
+  await mgr.apply({ hosts: [sshHost('dev004', '127.0.0.1', 19989), sshHost('dev005', '127.0.0.2', 19991)] });
+  const [a, b] = [mgr.get('dev004'), mgr.get('dev005')];
+  calls.length = 0;
+
+  // browseVersion is read-only in the window: an ipc caller cannot move the pin through editApp.
+  const res = await mgr.editApp({ pollSeconds: 30, browseVersion: '9.9.9', hosts: [] }, save);
+  assert.deepEqual(res, { pollSeconds: 30, browseVersion: PINNED_BROWSE_VERSION });
+  const stored = JSON.parse(readFileSync(path, 'utf8'));
+  assert.equal(stored.pollSeconds, 30);
+  assert.equal('browseVersion' in stored, false, 'the pin is not written');
+  assert.deepEqual(stored.hosts.map((h) => h.id), ['dev004', 'dev005'], 'the hosts are kept');
+  assert.equal(mgr.get('dev004'), a, 'dev004 keeps its controller');
+  assert.equal(mgr.get('dev005'), b, 'dev005 keeps its controller');
+  // No disconnect or connect: only each pending poll is re-armed, so a shorter interval applies at once.
+  assert.deepEqual(calls, [['dev004', 'schedulePoll'], ['dev005', 'schedulePoll']], 'no tunnel was disconnected or reconnected');
+  assert.deepEqual([a.cfg.pollSeconds, b.cfg.pollSeconds], [30, 30], 'each controller polls at the new interval');
+  assert.equal(mgr.config.pollSeconds, 30);
+
+  // Any other change to a host still rebuilds it.
+  await mgr.editHost('dev005', { remotePort: 20088 }, save);
+  assert.notEqual(mgr.get('dev005'), b, 'a changed relay port rebuilds the controller');
+  assert.equal(mgr.get('dev005').cfg.pollSeconds, 30);
 });
 
 test('hosts: removing a host stops only that host; the last host cannot be removed', async () => {

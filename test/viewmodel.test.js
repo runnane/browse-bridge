@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigStore, UNREADABLE_REFUSAL, normalizeAppConfig, pairingAddress } from '../src/core/config.js';
+import { ConfigStore, DEFAULTS, UNREADABLE_REFUSAL, normalizeAppConfig, pairingAddress } from '../src/core/config.js';
 import { Logger } from '../src/core/log.js';
 import {
-  AGENT_INSTALL_COMMAND, PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, hostRows, logForHost, logText,
-  pairingAddressOf, pairingView, parseHostForm, pickSelected, withHostSnapshot,
+  AGENT_INSTALL_COMMAND, DEFAULT_RELAY_PORT, DEFAULT_REMOTE_BROWSE, PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration,
+  generalView, hostRows, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, parsePort, pickSelected, transportText, withHostSnapshot,
 } from '../src/ui/viewmodel.js';
 
 // Two hosts as HostManager.snapshot() reports them: A on localhost:19988, B on 127.0.0.2:19988 (BBR-21).
@@ -190,10 +190,74 @@ test('viewmodel: each config refusal is shown next to the field it is about; any
     [{ hosts: [{ id: 'a', remotePort: 5000, innerPort: 5000 }] }, 'localAddress'],
     [{ hosts: [{ id: 'a', innerPort: 20001 }, { id: 'b', innerPort: 20001 }] }, 'localAddress'],
     [{ hosts: [{ id: 'a', sshOptions: ['nonsense'] }] }, 'sshOptions'],
+    [{ hosts: [{ id: 'a', remotePort: 0 }] }, 'remotePort'],
+    [{ hosts: [{ id: 'a', remotePort: 'x' }] }, 'remotePort'],
+    [{ hosts: [{ id: 'a', innerPort: 70000 }] }, 'localAddress'],
     [{ hosts: [{ id: 'a', transport: 'telnet' }] }, null],
   ];
   assert.deepEqual(cases.map(([raw]) => errorField(refusal(raw))), cases.map(([, field]) => field));
   assert.equal(errorField('something unexpected'), null);
+});
+
+// ---------- Advanced host fields and General (BBR-45) ----------
+
+test('viewmodel: the Advanced defaults are config.js\'s', () => {
+  assert.equal(DEFAULT_RELAY_PORT, DEFAULTS.remotePort);
+  assert.equal(DEFAULT_REMOTE_BROWSE, DEFAULTS.remoteBrowse);
+});
+
+test('viewmodel: the Advanced relay port takes a whole port number and refuses anything else on its own field', () => {
+  const edit = (remotePort) => parseHostForm({ host: 'jon@dev004', remotePort });
+  assert.equal(edit('20088').fields.remotePort, 20088);
+  assert.equal(edit(' 1 ').fields.remotePort, 1);
+  assert.equal(edit('65535').fields.remotePort, 65535);
+  const refused = { error: 'Enter the relay port, a whole number from 1 to 65535 (19988 unless the remote moved it).', field: 'remotePort' };
+  for (const bad of ['0', '65536', '-1', '19988.5', '0x50', '1e3', 'abc', '', '   ']) assert.deepEqual(edit(bad), refused, `remotePort ${JSON.stringify(bad)}`);
+  // Adding: a blank port is left to the default; a bad one is still refused.
+  assert.equal('remotePort' in parseHostForm({ host: 'jon@x', remotePort: '' }, { adding: true }).fields, false);
+  assert.deepEqual(parseHostForm({ host: 'jon@x', remotePort: '0' }, { adding: true }), refused);
+  // A form that does not carry the field sends nothing for it.
+  assert.equal('remotePort' in parseHostForm({ host: 'jon@x' }).fields, false);
+  assert.equal(parsePort('08080'), 8080);
+  assert.equal(parsePort(null), null);
+});
+
+test('viewmodel: the Advanced remote browse path is absolute or under the remote home; blank is the default', () => {
+  const edit = (remoteBrowse) => parseHostForm({ host: 'jon@dev004', remoteBrowse });
+  assert.equal(edit(' /opt/browse/bin/browse ').fields.remoteBrowse, '/opt/browse/bin/browse');
+  assert.equal(edit('$HOME/bin/browse').fields.remoteBrowse, '$HOME/bin/browse');
+  assert.equal(edit('~/bin/browse').fields.remoteBrowse, '~/bin/browse');
+  assert.equal(edit('').fields.remoteBrowse, '$HOME/.local/bin/browse', 'blank on Edit goes back to the default');
+  assert.equal('remoteBrowse' in parseHostForm({ host: 'jon@x', remoteBrowse: ' ' }, { adding: true }).fields, false, 'blank on Add is left out');
+  const refused = { error: 'Enter the path of browse on the remote host: absolute, or starting with $HOME/ or ~/.', field: 'remoteBrowse' };
+  for (const bad of ['browse', 'bin/browse', '$HOME', '/opt/browse/', '-oProxyCommand=x', '/opt/br\nowse', '$HOMEX/browse']) {
+    assert.deepEqual(edit(bad), refused, `remoteBrowse ${JSON.stringify(bad)}`);
+  }
+});
+
+test('viewmodel: the host form never sends a transport, so Apply cannot flip a local host to ssh', () => {
+  assert.equal('transport' in parseHostForm({ host: 'jon@x', transport: 'ssh', remotePort: '19988', remoteBrowse: '' }).fields, false);
+  assert.equal(transportText('ssh'), 'ssh');
+  assert.equal(transportText('local'), 'local (browse on this machine)');
+});
+
+test('viewmodel: General takes a poll interval of 2 to 3600 whole seconds and refuses anything else on its own field', () => {
+  assert.deepEqual(parseGeneralForm({ pollSeconds: '30' }), { fields: { pollSeconds: 30 } });
+  assert.deepEqual(parseGeneralForm({ pollSeconds: ' 2 ' }), { fields: { pollSeconds: 2 } });
+  assert.deepEqual(parseGeneralForm({ pollSeconds: '3600' }), { fields: { pollSeconds: 3600 } });
+  const refused = { error: 'Enter the poll interval in whole seconds, from 2 to 3600.', field: 'pollSeconds' };
+  for (const bad of ['1', '0', '3601', '', 'ten', '2.5', '-5', '1e2', '0x10', undefined]) {
+    assert.deepEqual(parseGeneralForm({ pollSeconds: bad }), refused, `pollSeconds ${JSON.stringify(bad)}`);
+  }
+  // Only the interval is sent: the pin is shown, never edited.
+  assert.deepEqual(Object.keys(parseGeneralForm({ pollSeconds: '10', browseVersion: '9.9.9' }).fields), ['pollSeconds']);
+});
+
+test('viewmodel: the General page shows the pin and the config path, and names the upgrade flow as not built', () => {
+  assert.equal(generalView(null), null);
+  const v = generalView({ pollSeconds: 10, browseVersion: '0.1.4', configPath: '/cfg/config.json' });
+  assert.deepEqual([v.pollSeconds, v.browseVersion, v.configPath], ['10', '0.1.4', '/cfg/config.json']);
+  assert.match(v.pinNote, /not built yet \(BBR-41\)/);
 });
 
 // ---------- formatting ----------
