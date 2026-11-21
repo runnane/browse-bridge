@@ -13,7 +13,7 @@ import { HostNotifier, TrayRenderer, coalesce, trayView } from './core/tray.js';
 import { readVersion } from './core/version.js';
 import { aboutInfo, linkUrl } from './core/about.js';
 import { readSshAliases } from './core/sshconfig.js';
-import { testConnection } from './core/sshtest.js';
+import { testConnection, expectedBrowseVersion } from './core/sshtest.js';
 import { UPDATE_CHECK_INTERVAL_MS, checkForUpdate, performUpdate, updateSummary } from './core/updater.js';
 import { iconPng, trayIconPng } from './icons.js';
 
@@ -665,7 +665,8 @@ function registerIpc() {
       sshOptions: Array.isArray(raw?.sshOptions) ? raw.sshOptions.map(String) : [],
       remoteBrowse: raw?.remoteBrowse ? String(raw.remoteBrowse) : undefined,
     };
-    const result = await testConnection(fields, { browseVersion: hosts.config?.browseVersion ?? PINNED_BROWSE_VERSION });
+    // BBR-62: the page names only a host id (null for Add Host); the version comes from the stored host.
+    const result = await testConnection(fields, expectedBrowseVersion(hosts.config, raw?.hostId, PINNED_BROWSE_VERSION));
     // Outcomes only: an unsaved destination is no configured host, so Copy Diagnostics could not hide it.
     logger.info('test', `test connection: ${result.steps.map((s) => `${s.name} ${s.kind ?? s.level}`).join(', ')}`);
     return result;

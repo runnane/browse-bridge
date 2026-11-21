@@ -694,7 +694,7 @@ $('btnTest').onclick = async () => {
   showTest('info', `Logging in to ${parsed.fields.host}…`);
   let view;
   try {
-    view = testResultView(await bridge.testConnection(parsed.fields));
+    view = testResultView(await bridge.testConnection({ ...parsed.fields, hostId: form.adding ? null : form.id }));
   } catch (err) {
     view = { kind: 'bad', text: cleanError(err.message) };
   }
