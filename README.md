@@ -38,7 +38,19 @@ the link (which browse itself does not encrypt) rides inside SSH.
   `~/.local` on the remote (no sudo), turns auto-update **off** persistently,
   binds the relay to `127.0.0.1`, restarts it — then **verifies at the remote**
   (version, `autoUpdate.effective`, and that the relay port listens on loopback
-  only). Any mismatch shows as a problem, never as success.
+  only). Any mismatch shows as a problem, never as success. A host that was
+  upgraded on its own (below) gets its own version instead of the pin.
+- **A newer browse, one host at a time:** at start-up and once a day (with
+  **Check for updates** on in General), and on **Check Now** on the Status
+  tab, the app reads the newest stable `@opencode/browse` from the npm registry
+  and says whether this release was tested with it ("browse 0.1.6 available
+  (not yet tested with this app)"). **Upgrade browse** on a host's Status tab
+  runs the same setup with that version on that host only, then verifies there:
+  the version, auto-update off, loopback only, and a status poll that shows the
+  browser reconnecting (when one was connected before). **Roll back browse**
+  puts the host back on the pin the same way. Every result is written to the
+  host's log, and a failed one stays a warning on the host. Nothing upgrades on
+  its own: there is no auto-upgrade switch.
 - **Several hosts at once:** the window's **host list** (left) shows every
   configured host with its state, ssh destination and pairing address. Select
   one and the toolbar, Status, Traffic, Log and Settings act on that host only.
@@ -49,7 +61,8 @@ the link (which browse itself does not encrypt) rides inside SSH.
   path are under **Advanced** in its Settings, collapsed by default.
 - **General:** below the host list, the settings for the whole app. These are
   start at login, the status poll interval and the pinned browse version, shown
-  read-only. **Open Config File** opens `config.json` for anything else.
+  read-only (one host can run another version through **Upgrade browse**, above).
+  **Open Config File** opens `config.json` for anything else.
 - **Pair browser:** asks the selected host's relay for a one-time code and
   shows it with **that host's** address to enter (`localhost:19988` for the
   first host, `127.0.0.2:19988` for the second, …). Codes never reach the log.
@@ -188,9 +201,9 @@ App-wide (the **General** page, below the host list):
 
 | key | default | in the window | meaning |
 | --- | --- | --- | --- |
-| `browseVersion` | 0.1.4 | General, read-only | pinned version setup installs and checks |
+| `browseVersion` | 0.1.4 | General, read-only | pinned version setup installs and checks on every host without its own |
 | `pollSeconds` | 10 | General | status poll interval in seconds (2 to 3600 in the window); a change reconnects no host |
-| `checkUpdates` | true | General | check daily whether origin has a newer browse-bridge (see Updating); saves on tick, reconnects no host |
+| `checkUpdates` | true | General | check daily whether origin has a newer browse-bridge (see Updating) and whether the npm registry has a newer browse; saves on tick, reconnects no host |
 
 Start at login is on the General page too. It is not a config key: it is the
 XDG autostart entry, and it saves as soon as you tick it.
@@ -217,6 +230,7 @@ Per host (each entry in `hosts`):
 | `autoConnect` | true | Settings | connect when the app starts |
 | `countActions` | false | Settings | count the commands the relay sends the browser (see above) |
 | `sshOptions` | `[]` | Settings | extra `-o Key=value` options |
+| `browseVersion` | — (the pin) | Status, **Upgrade browse** / **Roll back browse** | this host's own browse version, a stable `x.y.z`; set by Upgrade, removed by Roll back. Set Up Host and the version warning use it instead of the pin. A change reconnects no host |
 
 **Why an address per host, not a port per host:** the browse extension binds
 its pairing proof to the port it dials, and the relay checks it against its own
@@ -297,8 +311,12 @@ Run …"* with an update command (for an npm install, `npm install -g
 @opencode/browse@latest`). **Ignore it.** Running that command on a host
 replaces the pinned version with whatever is newest, which is exactly what the
 pin exists to prevent; the app will then warn that the running version is not
-the pinned one, and Set Up Host puts the pin back. Upgrade browse by updating
-browse-bridge, which moves the pin once a version is tested. *Evidence:* the
+the pinned one, and Set Up Host puts the pin back. To try a newer browse, use
+**Upgrade browse** on one host's Status tab: it installs the version the app's
+registry check found on that host only and verifies it there, and **Roll back
+browse** returns it to the pin. Updating browse-bridge moves the pin for every
+host once a version is tested (`TESTED_BROWSE_VERSIONS` beside the pin in
+`src/core/config.js`). *Evidence:* the
 notice and its command are read from upstream's source; the live wording and
 where it appears are not yet measured (BBR-51).
 

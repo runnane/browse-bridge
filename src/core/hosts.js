@@ -1,8 +1,14 @@
 import { EventEmitter } from 'node:events';
-import { hostConfig, normalizeAppConfig, withAppEdits, withHostAdded, withHostEdits, withHostRemoved } from './config.js';
+import { hostConfig, normalizeAppConfig, withAppEdits, withHostAdded, withHostBrowseVersion, withHostEdits, withHostRemoved } from './config.js';
 
-/** What a controller is rebuilt for: its effective config without the poll interval, which it reads at each poll. */
-const restartKey = (cfg) => JSON.stringify({ ...cfg, pollSeconds: undefined });
+/**
+ * What a controller is rebuilt for: its effective config without the poll
+ * interval, which it reads at each poll, and without the browse versions
+ * (BBR-41), which only setup and the warnings read: an Upgrade must not drop
+ * the tunnel it is about to verify through.
+ */
+const restartKey = (cfg) => JSON.stringify({ ...cfg, pollSeconds: undefined, browseVersion: undefined, pinnedBrowseVersion: undefined });
+const versionKey = (cfg) => `${cfg.browseVersion} ${cfg.pinnedBrowseVersion}`;
 import { Controller } from './controller.js';
 
 /**
@@ -120,11 +126,19 @@ export class HostManager extends EventEmitter {
     const added = [...next.keys()].filter((id) => !this.entries.has(id));
     // A host that differs only in the poll interval keeps its controller and tunnel. Its pending poll
     // timer is re-armed, so a shorter interval applies now, not after the old one runs out.
+    // One that differs only in its browse version (BBR-41) keeps them too; its warnings are recomputed.
     for (const [id, cfg] of next) {
       const entry = this.entries.get(id);
-      if (!entry || changed.includes(id) || entry.ctl.cfg.pollSeconds === cfg.pollSeconds) continue;
+      if (!entry || changed.includes(id)) continue;
+      const pollChanged = entry.ctl.cfg.pollSeconds !== cfg.pollSeconds;
+      const versionChanged = versionKey(entry.ctl.cfg) !== versionKey(cfg);
+      if (!pollChanged && !versionChanged) continue;
       entry.ctl.cfg = cfg;
-      entry.ctl.schedulePoll();
+      if (pollChanged) entry.ctl.schedulePoll();
+      if (versionChanged) {
+        entry.ctl.refreshWarnings();
+        entry.ctl.changed();
+      }
     }
 
     const wasWanted = new Map();
@@ -194,6 +208,24 @@ export class HostManager extends EventEmitter {
     const clean = save(withAppEdits(this.config, fields));
     await this.apply(clean);
     return { pollSeconds: clean.pollSeconds, browseVersion: clean.browseVersion, checkUpdates: clean.checkUpdates };
+  }
+
+  /**
+   * Upgrade browse on host `id` to `version`, or Roll back (`version` null) to
+   * the app's pin (BBR-41). The host's browse version is saved first, so Set Up
+   * Host, the warnings and a retry all aim at the version chosen, and an
+   * unreadable config refuses before the remote is touched. Then setup runs
+   * with it and verifies at the receiver (Controller.changeBrowse). A busy host
+   * is refused before anything is saved. The tunnel is not restarted.
+   * Resolves with changeBrowse's result.
+   */
+  async changeBrowse(id, version, save = normalizeAppConfig) {
+    await this.queue;
+    const ctl = this.controller(id);
+    if (ctl.busy) throw new Error(`busy: ${ctl.busy}`);
+    const clean = save(withHostBrowseVersion(this.config, id, version));
+    await this.apply(clean);
+    return this.controller(id).changeBrowse(version ? 'upgrade' : 'rollback');
   }
 
   /** Remove one host: its controller is disconnected and dropped. The last host is refused. */

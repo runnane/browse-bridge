@@ -270,7 +270,16 @@
         <span class="label">Agent tabs:</span><span class="value" id="tabs">—</span>
         <span class="label">Agents:</span><span class="value" id="agents">—</span>
         <span class="label">Auto-update:</span><span class="value" id="autoupdate">—</span>
+        <span class="label">browse to run:</span><span class="value" id="browseWant">—</span>
+        <span class="label">Upstream:</span><span class="value" id="browseUpstream">—</span>
       </div>
+      <!-- BBR-41: a newer browse is only offered; each button acts on the selected host and verifies it there. -->
+      <div class="buttons" style="justify-content:flex-start;margin-top:12px">
+        <button class="btn" id="btnCheckBrowse" title="Ask the npm registry for the newest stable browse now, instead of waiting for the daily check">Check Now</button>
+        <button class="btn" id="btnUpgradeBrowse" hidden title="Install this browse version on the selected host only, then check the version, auto-update off, loopback only and that the browser reconnects">Upgrade browse</button>
+        <button class="btn" id="btnRollbackBrowse" hidden title="Put the selected host back on the app's pinned browse, and verify it there">Roll back browse</button>
+      </div>
+      <div class="msg" id="browseResult" role="status" hidden style="margin-top:8px"><p id="browseResultText"></p></div>
     </section>
 
     <section class="page" id="trafficPage" role="tabpanel" hidden>
@@ -377,7 +386,7 @@
           <span></span><div class="hint"><div class="muted">Takes effect at once. It starts in the tray; each host's own start-up choice is in its Settings</div><div class="muted" id="appMenuNote" hidden>The application menu entry opens the window, so browse-bridge can be started again without a terminal (KRunner, the launcher, GNOME's overview)</div></div>
           <span class="label">Updates:</span>
           <span><label class="check"><input type="checkbox" id="checkUpdates">Check for updates</label></span>
-          <span></span><div class="hint"><div class="muted">At start-up and once a day, ask origin whether this checkout is behind; nothing is installed until you click Update and Restart in About. Takes effect at once</div></div>
+          <span></span><div class="hint"><div class="muted">At start-up and once a day, ask origin whether this checkout is behind; nothing is installed until you click Update and Restart in About. The same check asks the npm registry for the newest browse, shown on each host's Status tab. Takes effect at once</div></div>
           <label class="label" for="fPoll">Status poll interval:</label>
           <span><input type="text" id="fPoll" name="pollSeconds" inputmode="numeric" spellcheck="false" placeholder="10" style="width:90px"> seconds</span>
           <span></span><div class="hint"><div class="muted">How often each host's relay status is checked, 2 to 3600; applies to every host without reconnecting</div><div class="field-error" id="errPollSeconds" hidden></div></div>
@@ -465,7 +474,7 @@
       <h3>What the states mean</h3>
       <dl class="states" id="helpStates">
         <dt data-state="ready">Connected</dt><dd>Tunnel up, relay running, a browser connected.</dd>
-        <dt data-state="warning">Connected, with warnings</dt><dd>Working, but auto-update is on or a browse version other than the pinned one is running. The warning shows in a bar above the tabs; <b>Set Up Host</b> fixes both.</dd>
+        <dt data-state="warning">Connected, with warnings</dt><dd>Working, but auto-update is on, a browse version other than the one this host is set to run (the pin, unless it was upgraded on its own) is running, or an upgrade did not verify. The warning shows in a bar above the tabs; <b>Set Up Host</b> fixes the first two, <b>Roll back browse</b> the last.</dd>
         <dt data-state="needsPairing">Browser not connected</dt><dd>The bridge is up but no browser is connected: click <b>Pair Browser…</b>, or point the extension at this host's address.</dd>
         <dt data-state="relayIdle">Relay not running</dt><dd>Since browse 0.1.4 the relay no longer shuts itself down when idle, so this means something went wrong: it crashed, was stopped, or the host rebooted. Click <b>Restart Relay</b>; if it does not come back, the Log tab (relay log) says why.</dd>
         <dt data-state="connecting">Connecting</dt><dd>The tunnel is starting.</dd>
@@ -477,7 +486,9 @@
 
       <h3>Tabs and tray</h3>
       <ul>
-        <li><b>Status</b>: tunnel, relay, browser, agent tabs and auto-update for the selected host.</li>
+        <li><b>Status</b>: tunnel, relay, browser, agent tabs and auto-update for the selected host, and the browse version it is set to run.
+          Once a day (with <b>Check for updates</b> on) the app asks the npm registry for the newest browse and says whether this release was tested with it.
+          <b>Upgrade browse</b> installs it on the selected host only and verifies it there; <b>Roll back browse</b> puts that host back on the pin. Nothing upgrades on its own.</li>
         <li><b>Traffic</b>: bytes, rate and connections; with <b>Count browser actions</b> ticked in Settings, the names of the commands sent to the browser (never their contents).</li>
         <li><b>Log</b>: this host's lines, all hosts, or the remote relay log. <b>Open Log File</b> opens the full log.</li>
         <li><b>Settings</b>: the selected host's ssh destination, address and options. Its relay port and remote browse path are under <b>Advanced</b>.</li>

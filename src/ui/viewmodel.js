@@ -3,6 +3,8 @@
  * entries. No DOM and no Node imports, so the renderer loads it as an ES
  * module and test/viewmodel.test.js runs it without a display.
  */
+import { ROLLBACK_BROWSE_LABEL, UPGRADE_BROWSE_LABEL } from '../core/labels.js';
+import { compareVersions, testedText } from '../core/browseversion.js';
 
 /** Each state has a glyph and a word, so meaning never rides on colour alone. */
 export const GLYPH = Object.freeze({
@@ -59,6 +61,7 @@ export function pickSelected(hosts, selectedId) {
 /** Shared with core (tray, controller) so a message and the control it names cannot drift; see core/labels.js. */
 export {
   SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME, TEST_LABEL, SSH_OPTIONS_LABEL, CHECK_UPDATES_LABEL, UPDATE_LABEL, CHECK_NOW_LABEL,
+  UPGRADE_BROWSE_LABEL, ROLLBACK_BROWSE_LABEL,
 } from '../core/labels.js';
 
 /**
@@ -357,7 +360,7 @@ export function generalView(app) {
     pollSeconds: String(app.pollSeconds),
     checkUpdates: app.checkUpdates !== false,
     browseVersion: app.browseVersion,
-    pinNote: 'Set Up Host installs this version on each host and warns when a host runs another. Changing it from here is not built yet (BBR-41); a new browse-bridge release moves it.',
+    pinNote: `Set Up Host installs this version on each host and warns when a host runs another. A new browse-bridge release moves it. One host can try a newer browse first: ${UPGRADE_BROWSE_LABEL} on its Status tab, and ${ROLLBACK_BROWSE_LABEL} puts it back on this version.`,
     configPath: app.configPath,
   };
 }
@@ -377,6 +380,43 @@ export function updateView(update) {
     showUpdate: Boolean(update.canUpdate) || (Boolean(update.busy) && update.line !== null),
     canUpdate: Boolean(update.canUpdate),
     canCheck: Boolean(update.canCheck),
+  };
+}
+
+/**
+ * The Status tab's browse block for one host (BBR-41), from its snapshot and
+ * the state's `browse` block (core/browseversion.js browseUpstreamSummary):
+ *   version   what this host is set to run: the app's pin, or its own version
+ *   upstream  what the registry check found ("browse 0.1.6 available (not yet tested with this app). …")
+ *   upgrade   { text, note, enabled } when a version newer than this host's is known, else null
+ *   rollback  { text, enabled } when the host runs its own version, else null
+ *   result    the last Upgrade or Roll back: { kind: ok|bad, text }, or null
+ * Nothing can be clicked while the host is busy or has no ssh host.
+ */
+export function browseView(snap, upstream) {
+  const cfg = snap?.config ?? {};
+  const version = cfg.browseVersion ?? null;
+  const pin = cfg.pinnedBrowseVersion ?? version;
+  const tested = upstream?.tested ?? [];
+  const own = Boolean(version && pin && version !== pin);
+  const idle = Boolean(snap) && snap.overall !== 'unconfigured' && !snap.busy;
+  const latest = upstream?.latest ?? null;
+  const upgradeTo = latest && compareVersions(latest, version) === 1 ? latest : null;
+  let result = null;
+  const c = snap?.browseChange;
+  if (c) {
+    const what = c.action === 'rollback' ? 'Roll back' : 'Upgrade';
+    result = c.ok
+      ? { kind: 'ok', text: `${what} to browse ${c.version} verified${c.notes?.length ? `; ${c.notes.join('; ')}` : ''}.` }
+      : { kind: 'bad', text: `${what} to browse ${c.version} did not verify: ${c.problems.join('; ')}.` };
+  }
+  return {
+    version: !version ? 'unknown' : own ? `${version}, set for this host (the app pins ${pin}; ${testedText(version, tested)})` : `${version}, the app's pin`,
+    upstream: upstream?.detail ?? '',
+    upgrade: upgradeTo ? { text: `${UPGRADE_BROWSE_LABEL} on ${hostTitle(snap)} to ${upgradeTo}`, note: testedText(upgradeTo, tested), enabled: idle } : null,
+    rollback: own ? { text: `${ROLLBACK_BROWSE_LABEL} to ${pin}`, enabled: idle } : null,
+    canCheck: Boolean(upstream?.canCheck),
+    result,
   };
 }
 
