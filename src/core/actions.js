@@ -24,8 +24,8 @@ const BY_NAME = {
   screenshot: ['Page.captureScreenshot'],
   script: ['Runtime.evaluate', 'Runtime.callFunctionOn', 'Runtime.terminateExecution', 'Runtime.releaseObjectGroup', 'Page.createIsolatedWorld'],
   read: ['Page.getFrameTree', 'Page.getLayoutMetrics', 'Page.getNavigationHistory', 'Target.getTargetInfo'],
-  tab: ['tabs.create', 'tabs.remove', 'tabs.keepOpen', 'tabs.ungroup', 'Target.createTarget', 'Target.closeTarget', 'Page.close', 'Page.handleJavaScriptDialog'],
-  setup: ['debugger.attach', 'debugger.detach', 'action.setAttached', 'pageStatus.clear', 'Target.setAutoAttach', 'Target.detachFromTarget', 'Runtime.runIfWaitingForDebugger'],
+  tab: ['tabs.create', 'tabs.remove', 'tabs.keepOpen', 'tabs.ungroup', 'tabs.group', 'tabs.cleanup', 'Target.createTarget', 'Target.closeTarget', 'Page.close', 'Page.handleJavaScriptDialog'],
+  setup: ['debugger.attach', 'debugger.detach', 'action.setAttached', 'pageStatus.clear', 'pageStatus.set', 'action.setBadge', 'relay.settings', 'settings.get', 'settings.set', 'update.notice', 'runtime.reload', 'Target.setAutoAttach', 'Target.detachFromTarget', 'Runtime.runIfWaitingForDebugger'],
 };
 const TYPE_OF = new Map(Object.entries(BY_NAME).flatMap(([type, names]) => names.map((n) => [n, type])));
 

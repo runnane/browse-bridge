@@ -129,6 +129,22 @@ test('actions: classification follows the names browse 0.1.4 sends', () => {
   assert.equal(classify('Something.new'), 'other');
 });
 
+test('actions: relay housekeeping commands are setup (or tab), never "other"; unknown names still are', () => {
+  for (const name of ['relay.settings', 'settings.get', 'settings.set', 'update.notice', 'action.setBadge', 'pageStatus.set', 'runtime.reload']) {
+    assert.equal(classify(name), 'setup', name);
+  }
+  assert.equal(classify('tabs.group'), 'tab');
+  assert.equal(classify('tabs.cleanup'), 'tab');
+  for (const name of ['settings.reset', 'relay.newThing', 'update.other', 'tabs.somethingNew']) {
+    assert.equal(classify(name), 'other', `${name} is unknown, so it stays visible as "other"`);
+  }
+  const c = emptyCounts();
+  addCount(c, 'relay.settings');
+  addCount(c, 'brand.newCommand');
+  assert.equal(c.byType.other, 1);
+  assert.equal(c.byType.setup, 1);
+});
+
 test('actions: names are untrusted — odd names are "(unnamed)", the name table is capped, and inherited names are just names', () => {
   const c = emptyCounts();
   addCount(c, 'evil name with spaces and a password hunter2');
