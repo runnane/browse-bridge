@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigStore, UNREADABLE_REFUSAL, normalizeAppConfig, pairingAddress } from '../src/core/config.js';
 import { Logger } from '../src/core/log.js';
 import {
-  PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, hostRows, logForHost, logText,
+  AGENT_INSTALL_COMMAND, PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, hostRows, logForHost, logText,
   pairingAddressOf, pairingView, parseHostForm, pickSelected, withHostSnapshot,
 } from '../src/ui/viewmodel.js';
 
@@ -210,4 +210,23 @@ test('viewmodel: the window shows the same pairing address config.js gives the c
     assert.equal(pairingAddressOf({ localAddress, localPort }), want);
     assert.equal(pairingAddress({ localAddress, localPort }), want);
   }
+});
+
+// ---------- agents row (BBR-49) ----------
+
+test('agentsView: a list names the agents, an empty list says none set up with the install hint, null is unknown', () => {
+  assert.deepEqual(agentsView(['claude', 'codex']), { text: 'claude, codex', hint: '' });
+  const none = agentsView([]);
+  assert.equal(none.text, 'none set up');
+  assert.ok(none.hint.includes(AGENT_INSTALL_COMMAND), 'the hint names the install command');
+  assert.deepEqual(agentsView(null), { text: 'unknown', hint: '' });
+  assert.deepEqual(agentsView(undefined), { text: 'unknown', hint: '' });
+});
+
+test('agentsView: the hint command is the one the README gives', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const given = readme.match(/`(browse install[^`]*)`/);
+  assert.ok(given, 'README names a browse install command in backticks');
+  assert.equal(given[1], AGENT_INSTALL_COMMAND);
+  assert.ok(agentsView([]).hint.includes(given[1]));
 });

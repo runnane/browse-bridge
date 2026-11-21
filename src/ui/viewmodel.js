@@ -163,6 +163,24 @@ export function pairingView(state, selectedId, { now = Date.now(), dismissed = [
   };
 }
 
+// ---------- agents ----------
+
+/** The command that registers browse's MCP server with an agent on the remote; a test pins it to the README's. */
+export const AGENT_INSTALL_COMMAND = 'browse install -a claude';
+
+/**
+ * The Status page's Agents row (BBR-49) from `status.agents` (browse.js
+ * summarizeStatus): { text, hint }. null is unknown (never "none"); an empty
+ * list says none are set up and names the command to run on the remote.
+ */
+export function agentsView(agents) {
+  if (!Array.isArray(agents)) return { text: 'unknown', hint: '' };
+  if (agents.length === 0) {
+    return { text: 'none set up', hint: `Agents on the remote cannot see browse yet: run ${AGENT_INSTALL_COMMAND} there.` };
+  }
+  return { text: agents.join(', '), hint: '' };
+}
+
 // ---------- action counts ----------
 
 /**
