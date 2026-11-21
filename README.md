@@ -217,11 +217,58 @@ first keeps `localhost:19988` and a browser already paired there keeps working.
 Every other host needs pairing once at its new address. The file is rewritten
 on the next Save.
 
+### Which browse versions work together
+
+The pin today is browse **0.1.4**: Set Up Host installs it on each remote
+host, turns browse's auto-update off, and warns when a host runs anything
+else. The browser extension is not pinned: the Chrome Web Store always serves
+the newest **stable** release (development builds never reach the store). So
+a pinned relay meets an extension that moves on its own. This is why that is
+safe, and how long it stays safe.
+
+**Compatibility.** The extension and the relay agree on an *extension protocol*
+number; a relay accepts the range MIN..CURRENT and refuses anything outside it
+(the connection closes with code 4003). The pinned relay accepts 3..3. Browse
+0.1.5, the current stable, also speaks 3, with the same pairing scheme
+(`opencode-browser-pairing-v3`), handshake and relay-to-browser frames: 0.1.5
+is a rename of the extension to OpenCode Browse and nothing else. The 0.1.6
+development line changes none of those either. *Evidence:* read from
+upstream's source at each tag (BBR-39); a live run of the store extension
+against the pinned relay is not yet measured (BBR-51).
+
+**How far the pin may lag.** The pin may stay behind upstream for as long as
+the newest stable extension's protocol lies inside the pin's MIN..CURRENT
+range and the pairing scheme is unchanged; the age of the pin does not matter.
+Check on every upstream stable release, ideally within about two weeks:
+
+```bash
+node scripts/check-browse-pin.js   # exit 0: compatible; 1: move the pin; 2: could not check
+```
+
+It compares `protocol.rs` at the pin's tag and the newest stable tag, and
+lists which of the handshake, pairing, protocol and wire files changed, so you
+know what to read. When a stable release raises the protocol above the pin's
+CURRENT, move the pin before that extension reaches the store; otherwise the
+extension is refused and tells the user to update browse. A pin bump is itself
+gated on the integration tests against the real binary (`BROWSE_BIN`, below).
+
+**"browse 0.1.4 is out of date" in the extension.** With auto-update off, the
+relay still checks for releases and tells the extension about newer ones, so
+the extension's settings page shows *"browse 0.1.4 is out of date (… is out).
+Run …"* with an update command (for an npm install, `npm install -g
+@opencode/browse@latest`). **Ignore it.** Running that command on a host
+replaces the pinned version with whatever is newest, which is exactly what the
+pin exists to prevent; the app will then warn that the running version is not
+the pinned one, and Set Up Host puts the pin back. Upgrade browse by updating
+browse-bridge, which moves the pin once a version is tested. *Evidence:* the
+notice and its command are read from upstream's source; the live wording and
+where it appears are not yet measured (BBR-51).
+
 ## Development
 
 ```bash
-pnpm gates                                    # syntax check + all tests
-BROWSE_BIN=~/.local/bin/browse pnpm gates     # + integration tests against real browse (local, and ssh via a private sshd)
+npm run gates                                 # syntax check + all tests
+BROWSE_BIN=~/.local/bin/browse npm run gates  # + integration tests against real browse (local, and ssh via a private sshd)
 BB_SMOKE_OUT=/tmp/bb bin/browse-bridge --ozone-platform=headless   # render the window headlessly → /tmp/bb.png/.json
 ```
 
