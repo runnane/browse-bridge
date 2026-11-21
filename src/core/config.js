@@ -1,8 +1,17 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { isStableVersion } from './browseversion.js';
 
 /** The browse version this app installs and expects on the remote host. */
 export const PINNED_BROWSE_VERSION = '0.1.4';
+
+/**
+ * browse versions this release of the app has been measured against (BBR-41):
+ * the proxy's frame decoding and the pairing handshake. A newer upstream
+ * version outside this list is offered as "not yet tested with this app".
+ * The pin is always one of them; a test holds that.
+ */
+export const TESTED_BROWSE_VERSIONS = Object.freeze(['0.1.4']);
 
 /**
  * Pins earlier releases of this app wrote into config.json as the default.
@@ -112,8 +121,22 @@ export function normalizeConfig(raw = {}) {
 /** Settings that apply to the whole app, not to one host. */
 export const APP_KEYS = Object.freeze(['pollSeconds', 'browseVersion', 'checkUpdates']);
 
-/** Settings each host entry carries. `id` and `name` have no default; the rest fall back to DEFAULTS. */
-export const HOST_KEYS = Object.freeze(['id', 'name', 'host', 'transport', 'localAddress', 'innerPort', 'remotePort', 'remoteBrowse', 'sshOptions', 'autoConnect', 'countActions']);
+/**
+ * Settings each host entry carries. `id` and `name` have no default; the rest fall back to DEFAULTS,
+ * except `browseVersion` (BBR-41): a host carries it only to run another version than the app's pin,
+ * and without it the host follows the pin.
+ */
+export const HOST_KEYS = Object.freeze(['id', 'name', 'host', 'transport', 'localAddress', 'innerPort', 'remotePort', 'remoteBrowse', 'sshOptions', 'autoConnect', 'countActions', 'browseVersion']);
+
+/**
+ * Host settings the window's Settings form may write (saveConfig / addHost ipc). A host's
+ * browseVersion is not one: only Upgrade and Roll back move it (withHostBrowseVersion),
+ * and each of those verifies the host after the move.
+ */
+const HOST_FORM_KEYS = Object.freeze(HOST_KEYS.filter((k) => k !== 'id' && k !== 'browseVersion'));
+
+/** HOST_KEYS a host's flat config is copied back from: everything but the override, which is kept as written. */
+const HOST_FLAT_KEYS = Object.freeze(HOST_KEYS.filter((k) => k !== 'browseVersion'));
 
 /** A host id goes into log lines and ipc; lower-case only, so it can never look like a pairing code. */
 const HOST_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/;
@@ -179,7 +202,8 @@ function assignIds(entries) {
 export function normalizeAppConfig(raw = {}) {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('config must be an object');
   let entries;
-  if (raw.hosts === undefined) entries = [pick(raw, HOST_KEYS)];
+  // The single-host shape's top-level browseVersion is the app-wide pin, not a host override.
+  if (raw.hosts === undefined) entries = [pick(raw, HOST_FLAT_KEYS)];
   else if (!Array.isArray(raw.hosts)) throw new Error('hosts must be a list');
   else entries = raw.hosts;
   entries.forEach((e, i) => {
@@ -193,13 +217,17 @@ export function normalizeAppConfig(raw = {}) {
     if (!HOST_ID.test(e.id)) throw new Error(`host id ${JSON.stringify(e.id)} must be lower-case letters, digits, "-" or "_" (at most 32)`);
     if (seen.has(e.id)) throw new Error(`two hosts have the id "${e.id}"`);
     seen.add(e.id);
+    const own = isSet(e.browseVersion) ? String(e.browseVersion).trim() : null;
+    if (own !== null && !isStableVersion(own)) {
+      throw new Error(`host "${e.id}": browseVersion must be a stable version such as ${PINNED_BROWSE_VERSION}, got ${JSON.stringify(e.browseVersion)}`);
+    }
     let flat;
     try {
       flat = normalizeConfig({ ...e, pollSeconds: app.pollSeconds, browseVersion: app.browseVersion });
     } catch (err) {
       throw new Error(`host "${e.id}": ${err.message}`);
     }
-    return { ...pick(flat, HOST_KEYS), id: e.id, name: String(e.name ?? '').trim() };
+    return { ...pick(flat, HOST_FLAT_KEYS), id: e.id, name: String(e.name ?? '').trim(), ...(own ? { browseVersion: own } : {}) };
   });
 
   // What each host binds on this machine: its pairing address, and its ssh forward on 127.0.0.1.
@@ -225,19 +253,43 @@ export function hostConfig(app, id) {
   const h = app.hosts.find((x) => x.id === id);
   if (!h) throw new Error(`no host with id "${id}"`);
   // checkUpdates is app-wide (BBR-43): a host's config never carries it, so it cannot read as that host's setting.
-  const { checkUpdates: _app, ...flat } = normalizeConfig({ ...h, pollSeconds: app.pollSeconds, browseVersion: app.browseVersion });
+  // browseVersion is the host's own when it has one (BBR-41), else the app's pin; pinnedBrowseVersion is always the pin.
+  const { checkUpdates: _app, ...flat } = normalizeConfig({
+    ...h, pollSeconds: app.pollSeconds, browseVersion: h.browseVersion || app.browseVersion, pinnedBrowseVersion: app.browseVersion,
+  });
   return flat;
 }
 
 /**
  * The app config with one host's fields replaced (e.g. by the Settings form).
- * Only host fields are taken from `fields`, and the id stays. Not validated
- * here: saveConfig / normalizeAppConfig do that.
+ * Only the form's host fields are taken from `fields` (not the id, and not
+ * browseVersion: see withHostBrowseVersion). Not validated here:
+ * saveConfig / normalizeAppConfig do that.
  */
 export function withHostEdits(app, id, fields) {
   if (!app.hosts.some((h) => h.id === id)) throw new Error(`no host with id "${id}"`);
-  const edits = pick(fields, HOST_KEYS.filter((k) => k !== 'id'));
+  const edits = pick(fields, HOST_FORM_KEYS);
   return { ...app, hosts: app.hosts.map((h) => (h.id === id ? { ...h, ...edits } : h)) };
+}
+
+/**
+ * The app config with one host's browse version set (Upgrade) or cleared
+ * (`null`, Roll back: the host follows the app's pin again). A version equal
+ * to the pin is stored as no override, so the host keeps following the pin
+ * when a later release moves it. Not validated here: normalizeAppConfig
+ * refuses anything but a stable x.y.z.
+ */
+export function withHostBrowseVersion(app, id, version) {
+  if (!app.hosts.some((h) => h.id === id)) throw new Error(`no host with id "${id}"`);
+  const own = isSet(version) && version !== app.browseVersion ? version : null;
+  return {
+    ...app,
+    hosts: app.hosts.map((h) => {
+      if (h.id !== id) return h;
+      const { browseVersion: _old, ...rest } = h;
+      return own ? { ...rest, browseVersion: own } : rest;
+    }),
+  };
 }
 
 /**
@@ -277,7 +329,7 @@ export function suggestHostId(fields, taken = []) {
  * here: saveConfig / normalizeAppConfig do that (duplicate id, port clash, …).
  */
 export function withHostAdded(app, fields) {
-  const entry = Object.fromEntries(Object.entries(pick(fields, HOST_KEYS)).filter(([, v]) => isSet(v)));
+  const entry = Object.fromEntries(Object.entries(pick(fields, ['id', ...HOST_FORM_KEYS])).filter(([, v]) => isSet(v)));
   if (!isSet(entry.id)) {
     const id = suggestHostId(entry, app.hosts.map((h) => h.id));
     if (id) entry.id = id;
@@ -314,7 +366,8 @@ export function saveConfig(path, cfg) {
   stored.hosts = clean.hosts.map((h) => ({
     id: h.id,
     ...(h.name ? { name: h.name } : {}),
-    ...Object.fromEntries(HOST_KEYS.filter((k) => k !== 'id' && k !== 'name' && differs(k, h[k])).map((k) => [k, h[k]])),
+    // A host's browseVersion is written whenever it has one: it is an override, never a default.
+    ...Object.fromEntries(HOST_KEYS.filter((k) => k !== 'id' && k !== 'name' && (k === 'browseVersion' ? isSet(h[k]) : differs(k, h[k]))).map((k) => [k, h[k]])),
   }));
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp`;

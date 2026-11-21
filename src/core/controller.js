@@ -5,9 +5,14 @@ import { createCountingProxy } from './proxy.js';
 import { summarizeCounts } from './actions.js';
 import { pairingAddress } from './config.js';
 import { TunnelSupervisor } from './tunnel.js';
-import { SETUP_LABEL } from './labels.js';
+import { ROLLBACK_BROWSE_LABEL, SETUP_LABEL } from './labels.js';
 import { classifySshError } from './ssherror.js';
 import { SETUP_SCRIPT, parsePairOutput, parseSetupOutput, summarizeStatus, verifySetup } from './browse.js';
+
+/** An upgrade or roll back restarts the relay; a browser that was connected gets this long to come back (BBR-41). */
+export const RECONNECT_TIMEOUT_MS = 60_000;
+/** How often the relay is asked meanwhile. */
+export const RECONNECT_INTERVAL_MS = 3_000;
 
 /**
  * The one overall state the tray shows. Each carries a label so meaning never
@@ -45,9 +50,22 @@ export function computeOverall({ configured, wanted, tunnel, status, warnings, f
  * "change" event.
  */
 export class Controller extends EventEmitter {
-  constructor({ config, logger, controlDir = null, localEnv = process.env, spawnImpl } = {}) {
+  constructor({
+    config, logger, controlDir = null, localEnv = process.env, spawnImpl,
+    reconnectTimeoutMs = RECONNECT_TIMEOUT_MS, reconnectIntervalMs = RECONNECT_INTERVAL_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  } = {}) {
     super();
     this.cfg = config;
+    /** How long an upgrade or roll back waits for a browser that was connected to come back, and how often it asks (BBR-41). */
+    this.reconnectTimeoutMs = reconnectTimeoutMs;
+    this.reconnectIntervalMs = reconnectIntervalMs;
+    this.sleep = sleep;
+    /**
+     * The last Upgrade or Roll back on this host (BBR-41), or null:
+     * { action: 'upgrade' | 'rollback', version, pin, ok, problems, notes, at }.
+     * A failed one stays a warning until a later setup of this host verifies.
+     */
+    this.browseChange = null;
     this.logger = logger;
     this.controlDir = controlDir;
     this.localEnv = localEnv;
@@ -118,6 +136,8 @@ export class Controller extends EventEmitter {
       connections: this.connections.map((c) => ({ ...c })),
       pairing: this.pairing,
       busy: this.busy,
+      /** The last Upgrade or Roll back and how its verification went (BBR-41), or null. */
+      browseChange: this.browseChange,
       config: this.cfg,
     };
   }
@@ -301,11 +321,31 @@ export class Controller extends EventEmitter {
     this.schedulePoll();
   }
 
+  /**
+   * The warnings for a status summary (null when none was read), plus a failed
+   * Upgrade or Roll back. The expected version is the host's own (BBR-41):
+   * its override when it has one, else the app's pin.
+   */
   statusWarnings(s) {
     const w = [];
-    if (s.autoUpdate !== 'off') w.push(`auto-update is ${s.autoUpdate ?? 'unmeasured'} — click "${SETUP_LABEL}"`);
-    if (s.relayVersion && s.relayVersion !== this.cfg.browseVersion) w.push(`browse ${s.relayVersion} running, ${this.cfg.browseVersion} pinned`);
+    const want = this.cfg.browseVersion;
+    const pin = this.cfg.pinnedBrowseVersion ?? want;
+    if (s && s.autoUpdate !== 'off') w.push(`auto-update is ${s.autoUpdate ?? 'unmeasured'} — click "${SETUP_LABEL}"`);
+    if (s?.relayVersion && s.relayVersion !== want) {
+      w.push(want === pin ? `browse ${s.relayVersion} running, ${want} pinned` : `browse ${s.relayVersion} running, ${want} set for this host (the app pins ${pin})`);
+    }
+    const c = this.browseChange;
+    if (c && !c.ok) {
+      const what = c.action === 'rollback' ? `Roll back to browse ${c.version}` : `Upgrade to browse ${c.version}`;
+      const fix = c.action === 'rollback' ? `click "${SETUP_LABEL}" to try again` : `click "${ROLLBACK_BROWSE_LABEL}" to return to ${c.pin}`;
+      w.push(`${what} did not verify: ${c.problems.join('; ')} — ${fix}`);
+    }
     return w;
+  }
+
+  /** Recompute the warnings without a poll: the host's browse version or its last Upgrade changed (BBR-41). */
+  refreshWarnings() {
+    this.warnings = this.statusWarnings(this.status);
   }
 
   async withBusy(label, fn) {
@@ -320,22 +360,113 @@ export class Controller extends EventEmitter {
     }
   }
 
-  /** Install/pin browse on the remote, turn auto-update off, bind loopback, restart; verify at the receiver. */
+  /**
+   * Run SETUP_SCRIPT for `version` (its second argument; the script body is
+   * not changed here) and check the result at the receiver. Returns
+   * { problems, steps }; an empty list is the only "ok". Not busy-guarded:
+   * setupRemote and changeBrowse are.
+   */
+  async runSetup(version) {
+    this.logger.info('setup', `running setup (browse ${version})`);
+    const res = await this.transport().script(SETUP_SCRIPT, [this.cfg.remoteBrowse, version], {
+      controlDir: this.controlDir,
+      timeoutMs: 180_000,
+    });
+    for (const line of res.stderr.split('\n')) if (line.trim()) this.logger.info('setup', line.trim());
+    const parsed = parseSetupOutput(res.stdout);
+    const problems = verifySetup(parsed, { version });
+    if (res.code !== 0) problems.unshift(res.timedOut ? 'setup timed out' : `setup exited ${res.code}: ${res.stdout.split('\n').filter((l) => l && !l.startsWith('@@')).pop() ?? ''}`);
+    return { problems, steps: parsed.steps };
+  }
+
+  /**
+   * Install this host's browse version (its own, else the pin), turn auto-update off, bind loopback,
+   * restart; verify at the receiver. A clean run also clears a failed Upgrade or Roll back.
+   */
   setupRemote() {
     return this.withBusy('Setting up remote', async () => {
-      this.logger.info('setup', `running setup (browse ${this.cfg.browseVersion})`);
-      const res = await this.transport().script(SETUP_SCRIPT, [this.cfg.remoteBrowse, this.cfg.browseVersion], {
-        controlDir: this.controlDir,
-        timeoutMs: 180_000,
-      });
-      for (const line of res.stderr.split('\n')) if (line.trim()) this.logger.info('setup', line.trim());
-      const parsed = parseSetupOutput(res.stdout);
-      const problems = verifySetup(parsed, { version: this.cfg.browseVersion });
-      if (res.code !== 0) problems.unshift(res.timedOut ? 'setup timed out' : `setup exited ${res.code}: ${res.stdout.split('\n').filter((l) => l && !l.startsWith('@@')).pop() ?? ''}`);
+      const version = this.cfg.browseVersion;
+      const { problems, steps } = await this.runSetup(version);
       if (problems.length) for (const p of problems) this.logger.error('setup', p);
-      else this.logger.info('setup', 'verified: pinned version, auto-update off, relay on loopback only');
+      else this.logger.info('setup', `verified: browse ${version}, auto-update off, relay on loopback only`);
+      if (!problems.length && this.browseChange && !this.browseChange.ok) this.browseChange = null;
+      this.refreshWarnings();
       if (this.wanted) this.pollNow();
-      return { ok: problems.length === 0, problems, steps: parsed.steps };
+      return { ok: problems.length === 0, problems, steps, version };
+    });
+  }
+
+  /** One `browse status --json`, summarised; null when it failed or said nothing parseable. */
+  async readStatus() {
+    const res = await this.transport().browse(['status', '--json'], { controlDir: this.controlDir, timeoutMs: 20_000 });
+    try {
+      return res.code === 0 ? summarizeStatus(JSON.parse(res.stdout)) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * After the restart: ask the relay what it runs, and, when a browser was
+   * connected before, wait (up to reconnectTimeoutMs) for it to come back.
+   * Returns { problems, notes }. A reconnect that could not be measured,
+   * because no browser was connected, is a note and never reads as verified.
+   */
+  async verifyReconnect(version, { wasConnected }) {
+    const problems = [];
+    const notes = [];
+    const attempts = wasConnected ? Math.max(1, Math.ceil(this.reconnectTimeoutMs / this.reconnectIntervalMs)) : 1;
+    let summary = null;
+    for (let i = 1; ; i++) {
+      summary = await this.readStatus();
+      if (summary?.extensionConnected === true || i >= attempts) break;
+      await this.sleep(this.reconnectIntervalMs);
+    }
+    if (!summary) {
+      problems.push('browse status --json returned nothing parseable after the restart');
+    } else {
+      if (summary.relayVersion && summary.relayVersion !== version) problems.push(`the relay reports browse ${summary.relayVersion}, expected ${version}`);
+      if (wasConnected && summary.extensionConnected !== true) problems.push(`the browser did not reconnect within ${Math.round(this.reconnectTimeoutMs / 1000)} s`);
+    }
+    if (!wasConnected) notes.push('no browser was connected before, so its reconnect was not checked');
+    return { problems, notes };
+  }
+
+  /**
+   * Upgrade (action 'upgrade') or Roll back ('rollback') browse on this host
+   * (BBR-41): run setup with the host's browse version, which the caller has
+   * already set (HostManager.changeBrowse), then verify at the receiver: the
+   * version, auto-update off, loopback only, and a status poll that shows the
+   * browser reconnecting. Every result goes in this host's log, and the outcome
+   * stays in the snapshot (`browseChange`); a failed one is a warning.
+   * Resolves with { ok, problems, notes, steps, action, version }.
+   */
+  changeBrowse(action) {
+    if (action !== 'upgrade' && action !== 'rollback') throw new Error(`no browse change "${action}"`);
+    const verb = action === 'rollback' ? 'roll back' : 'upgrade';
+    return this.withBusy(action === 'rollback' ? 'Rolling back browse' : 'Upgrading browse', async () => {
+      const version = this.cfg.browseVersion;
+      const pin = this.cfg.pinnedBrowseVersion ?? version;
+      const wasConnected = this.wanted && this.status?.extensionConnected === true;
+      this.logger.info('browse', `${verb}: browse ${this.status?.relayVersion ?? '(version unknown)'} → ${version}${version === pin ? ' (the pin)' : ''}`);
+      const { problems, steps } = await this.runSetup(version);
+      let notes = [];
+      // The status poll runs only after a clean setup: a failed one has already said what is wrong.
+      if (!problems.length) {
+        const after = await this.verifyReconnect(version, { wasConnected });
+        problems.push(...after.problems);
+        notes = after.notes;
+      }
+      const ok = problems.length === 0;
+      this.browseChange = { action, version, pin, ok, problems, notes, at: new Date().toISOString() };
+      if (ok) {
+        this.logger.info('browse', `${verb} to browse ${version} verified: version, auto-update off, relay on loopback only, ${wasConnected ? 'browser reconnected' : notes[0]}`);
+      } else {
+        for (const p of problems) this.logger.error('browse', `${verb} to browse ${version}: ${p}`);
+      }
+      this.refreshWarnings();
+      if (this.wanted) this.pollNow();
+      return { ok, problems, notes, steps, action, version };
     });
   }
 

@@ -9,6 +9,7 @@ import {
   AGENT_INSTALL_COMMAND, DEFAULT_RELAY_PORT, DEFAULT_REMOTE_BROWSE, PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration,
   appMenuView, generalView, updateView, hostRows, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, parsePort, pickSelected, transportText, withHostSnapshot,
   aliasOptions, aliasWarning, parseTestForm, problemBar, testResultView,
+  browseView, UPGRADE_BROWSE_LABEL, ROLLBACK_BROWSE_LABEL,
 } from '../src/ui/viewmodel.js';
 
 // Two hosts as HostManager.snapshot() reports them: A on localhost:19988, B on 127.0.0.2:19988 (BBR-21).
@@ -288,11 +289,44 @@ test('viewmodel: General takes a poll interval of 2 to 3600 whole seconds and re
   assert.deepEqual(Object.keys(parseGeneralForm({ pollSeconds: '10', browseVersion: '9.9.9' }).fields), ['pollSeconds']);
 });
 
-test('viewmodel: the General page shows the pin and the config path, and names the upgrade flow as not built', () => {
+test('viewmodel: the General page shows the pin and the config path, and names the per-host upgrade controls (BBR-41)', () => {
   assert.equal(generalView(null), null);
   const v = generalView({ pollSeconds: 10, browseVersion: '0.1.4', configPath: '/cfg/config.json' });
   assert.deepEqual([v.pollSeconds, v.browseVersion, v.configPath], ['10', '0.1.4', '/cfg/config.json']);
-  assert.match(v.pinNote, /not built yet \(BBR-41\)/);
+  assert.ok(v.pinNote.includes(`${UPGRADE_BROWSE_LABEL} on its Status tab, and ${ROLLBACK_BROWSE_LABEL} puts it back`), v.pinNote);
+  assert.doesNotMatch(v.pinNote, /not built yet/);
+});
+
+// ---------- the browse version per host (BBR-41) ----------
+
+const upstream = (latest, extra = {}) => ({ latest, detail: `browse ${latest} available (not yet tested with this app). This app pins 0.1.4.`, tested: ['0.1.4'], canCheck: true, ...extra });
+const withVersion = (browseVersion, extra = {}) => hostSnap('dev004', '127.0.0.1', { overall: 'ready', config: { browseVersion, pinnedBrowseVersion: '0.1.4' }, ...extra });
+
+test('viewmodel: a newer version is offered as Upgrade on that host, with whether it was tested', () => {
+  const v = browseView(withVersion('0.1.4'), upstream('0.1.6'));
+  assert.equal(v.version, '0.1.4, the app\'s pin');
+  assert.deepEqual(v.upgrade, { text: `${UPGRADE_BROWSE_LABEL} on dev004 to 0.1.6`, note: 'not yet tested with this app', enabled: true });
+  assert.equal(v.rollback, null, 'a host on the pin has nothing to roll back');
+  assert.equal(browseView(withVersion('0.1.4'), upstream('0.1.4', { tested: ['0.1.4'] })).upgrade, null, 'nothing newer, no button');
+  assert.equal(browseView(withVersion('0.1.4'), upstream('0.1.6', { tested: ['0.1.4', '0.1.6'] })).upgrade.note, 'tested with this app');
+  assert.equal(browseView(withVersion('0.1.4'), null).upgrade, null, 'before any check, no button');
+  assert.equal(browseView(withVersion('0.1.4', { busy: 'Pairing' }), upstream('0.1.6')).upgrade.enabled, false);
+  assert.equal(browseView(withVersion('0.1.4', { overall: 'unconfigured' }), upstream('0.1.6')).upgrade.enabled, false);
+});
+
+test('viewmodel: a host on its own version shows it as such and offers Roll back to the pin', () => {
+  const v = browseView(withVersion('0.1.6'), upstream('0.1.6'));
+  assert.equal(v.version, '0.1.6, set for this host (the app pins 0.1.4; not yet tested with this app)');
+  assert.equal(v.upgrade, null, 'it already runs the newest');
+  assert.deepEqual(v.rollback, { text: `${ROLLBACK_BROWSE_LABEL} to 0.1.4`, enabled: true });
+});
+
+test('viewmodel: the last Upgrade shows what failed, and a verified one says so', () => {
+  const failed = browseView(withVersion('0.1.6', { browseChange: { action: 'upgrade', version: '0.1.6', ok: false, problems: ['browse version is 0.1.4, expected 0.1.6'], notes: [] } }), upstream('0.1.6'));
+  assert.deepEqual(failed.result, { kind: 'bad', text: 'Upgrade to browse 0.1.6 did not verify: browse version is 0.1.4, expected 0.1.6.' });
+  const back = browseView(withVersion('0.1.4', { browseChange: { action: 'rollback', version: '0.1.4', ok: true, problems: [], notes: ['no browser was connected before, so its reconnect was not checked'] } }), null);
+  assert.deepEqual(back.result, { kind: 'ok', text: 'Roll back to browse 0.1.4 verified; no browser was connected before, so its reconnect was not checked.' });
+  assert.equal(browseView(withVersion('0.1.4'), null).result, null);
 });
 
 test('viewmodel: the update notice shows in the status bar only when there is one, and About\'s buttons follow it (BBR-43)', () => {

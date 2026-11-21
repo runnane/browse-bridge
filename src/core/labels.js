@@ -27,5 +27,11 @@ export const UPDATE_LABEL = 'Update and Restart';
 /** The About dialog's button that checks for updates now, instead of waiting for the daily check (BBR-43). */
 export const CHECK_NOW_LABEL = 'Check Now';
 
+/** The Status tab's button that installs a newer browse on the selected host and verifies it there (BBR-41). */
+export const UPGRADE_BROWSE_LABEL = 'Upgrade browse';
+
+/** The Status tab's button that puts a host that runs its own browse version back on the app's pin (BBR-41). */
+export const ROLLBACK_BROWSE_LABEL = 'Roll back browse';
+
 /** What the browse extension is called in the Chrome Web Store and on its toolbar button, since browse 0.1.5. */
 export const EXTENSION_NAME = 'OpenCode Browse';

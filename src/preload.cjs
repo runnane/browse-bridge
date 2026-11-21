@@ -6,11 +6,18 @@ const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
 contextBridge.exposeInMainWorld('bridge', {
   // { overall, label, hosts: [per-host snapshot, …], configFailure: null | { path, message, backup, backupError },
   //   app: { pollSeconds, browseVersion, checkUpdates, configPath },
-  //   update: { line, detail, subjects, canUpdate, canCheck, busy } (core/updater.js updateSummary) }
+  //   update: { line, detail, subjects, canUpdate, canCheck, busy } (core/updater.js updateSummary),
+  //   browse: { line, detail, latest, newer, tested, pin, canCheck, checking } (core/browseversion.js browseUpstreamSummary) }
   state: invoke('state'),
   // BBR-43: check for a newer browse-bridge now; fast-forward, install if needed and restart. Each resolves to `update` above.
   checkForUpdates: invoke('checkForUpdates'),
   updateNow: invoke('updateNow'),
+  // BBR-41: checkBrowse() reads the newest browse from the npm registry now and resolves to `browse` above
+  // (core/browseversion.js browseUpstreamSummary); upgradeBrowse(id) / rollbackBrowse(id) resolve to the
+  // verification result { ok, problems, notes, action, version }. The page never names a version.
+  checkBrowse: invoke('checkBrowse'),
+  upgradeBrowse: invoke('upgradeBrowse'),
+  rollbackBrowse: invoke('rollbackBrowse'),
   // An unreadable config file (BBR-36): read it again, or replace it with one empty host (the old bytes are kept).
   reloadConfig: invoke('reloadConfig'),
   startOver: invoke('startOver'),

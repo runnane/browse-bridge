@@ -2,7 +2,8 @@ import { app, BrowserWindow, Menu, Notification, Tray, clipboard, ipcMain, nativ
 import os from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ConfigStore, PINNED_BROWSE_VERSION, normalizeAppConfig, pairingAddress } from './core/config.js';
+import { ConfigStore, PINNED_BROWSE_VERSION, TESTED_BROWSE_VERSIONS, normalizeAppConfig, pairingAddress } from './core/config.js';
+import { BROWSE_CHECK_INTERVAL_MS, browseUpstreamSummary, checkLatestBrowse, compareVersions, isStableVersion } from './core/browseversion.js';
 import { buildDiagnostics } from './core/diagnostics.js';
 import { Logger } from './core/log.js';
 import { timed, createLagMonitor } from './core/stall.js';
@@ -53,6 +54,9 @@ const appDir = join(here, '..');
 /** The updater's state (BBR-43); core/updater.js's updateSummary turns it into what the window and tray show. */
 const updates = { enabled: true, checking: false, updating: false, result: null, outcome: null };
 let updateTimer = null;
+/** The newest stable browse on the npm registry (BBR-41); core/browseversion.js's browseUpstreamSummary turns it into what the window shows. */
+const browseUpstream = { enabled: true, checking: false, result: null };
+let browseTimer = null;
 
 const paths = () => {
   const dir = app.getPath('userData');
@@ -131,6 +135,8 @@ async function start() {
   if (!startsHidden(process.argv) || hosts.snapshot().overall === 'none' || store.failure) showWindow();
   // Not awaited: a slow fetch must not hold start-up. Then every 24 h while the setting is on.
   scheduleUpdateChecks();
+  // The newest browse on the npm registry (BBR-41): the same setting, the same cadence, not awaited either.
+  scheduleBrowseChecks();
   if (process.env.BB_SMOKE_OUT) smoke(process.env.BB_SMOKE_OUT);
   if (process.env.BB_PROBE_WINDOW) probeWindow(process.env.BB_PROBE_WINDOW);
 }
@@ -159,7 +165,68 @@ function appState() {
   const app = hosts.config
     ? { pollSeconds: hosts.config.pollSeconds, browseVersion: hosts.config.browseVersion, checkUpdates: hosts.config.checkUpdates, configPath: store.path }
     : null;
-  return { ...hosts.snapshot(), configFailure: store.failure, app, update: updateSummary(updates) };
+  return { ...hosts.snapshot(), configFailure: store.failure, app, update: updateSummary(updates), browse: browseSummary() };
+}
+
+// ---------- the newest browse upstream (BBR-41; the decisions are in core/browseversion.js) ----------
+
+function browseSummary() {
+  return browseUpstreamSummary(browseUpstream, { pin: hosts?.config?.browseVersion ?? PINNED_BROWSE_VERSION, tested: TESTED_BROWSE_VERSIONS });
+}
+
+/**
+ * Follow the Check for updates setting for the browse check too: at start-up
+ * and every 24 h when on; when off, stop and drop what was read. Unlike the
+ * app's own update check this runs in a packaged build as well. The headless
+ * test hooks never fetch: BB_SMOKE_BROWSE=<x.y.z> shows that as the newest
+ * version instead, so the smoke run can render the notice.
+ */
+function scheduleBrowseChecks() {
+  clearInterval(browseTimer);
+  browseTimer = null;
+  if (process.env.BB_SMOKE_OUT || process.env.BB_PROBE_WINDOW) {
+    const v = process.env.BB_SMOKE_BROWSE;
+    browseUpstream.result = isStableVersion(v) ? { status: 'ok', latest: v, checkedAt: new Date().toISOString() } : null;
+    return;
+  }
+  browseUpstream.enabled = hosts.config?.checkUpdates !== false;
+  if (!browseUpstream.enabled) {
+    browseUpstream.result = null;
+    return;
+  }
+  runBrowseCheck();
+  browseTimer = setInterval(runBrowseCheck, BROWSE_CHECK_INTERVAL_MS);
+  browseTimer.unref?.();
+}
+
+/** One registry read; a second one while one runs is dropped. Never throws. The window is told through the state call. */
+async function runBrowseCheck() {
+  if (!browseUpstream.enabled || browseUpstream.checking || process.env.BB_SMOKE_OUT || process.env.BB_PROBE_WINDOW) return;
+  browseUpstream.checking = true;
+  try {
+    const result = await checkLatestBrowse();
+    if (browseUpstream.enabled) browseUpstream.result = result;
+    if (result.status === 'ok') logger.info('browse', `newest stable browse on the npm registry: ${result.latest}${browseSummary().line ? ` (${browseSummary().line})` : ''}`);
+    else logger.warn('browse', `could not check for a newer browse: ${result.reason}`);
+  } catch (err) {
+    report(err);
+  } finally {
+    browseUpstream.checking = false;
+  }
+}
+
+/** Upgrade: the version is the one main's own check found, never one the page names. Roll back: the pin. */
+async function changeBrowse(id, upgrade) {
+  let version = null;
+  if (upgrade) {
+    version = browseSummary().latest;
+    if (!isStableVersion(version)) throw new Error('No newer browse is known yet: check for one first.');
+    const current = hosts.controller(id).cfg.browseVersion;
+    if (compareVersions(version, current) !== 1) throw new Error(`browse ${version} is not newer than ${current}, which this host already runs.`);
+  }
+  const res = await hosts.changeBrowse(id, version, (cfg) => store.save(cfg));
+  trayChanged();
+  return res;
 }
 
 // ---------- updates for a source checkout (BBR-43; the decisions are in core/updater.js) ----------
@@ -196,7 +263,9 @@ function scheduleUpdateChecks() {
 
 /** Check for updates was turned on or off by a save or a re-read config.json: start or stop the daily check now. */
 function followUpdateSetting(before) {
-  if (hosts.config?.checkUpdates !== before) scheduleUpdateChecks();
+  if (hosts.config?.checkUpdates === before) return;
+  scheduleUpdateChecks();
+  scheduleBrowseChecks();
 }
 
 /** One check; a second one while a check or an update runs is dropped. Never throws. */
@@ -482,6 +551,7 @@ async function quit() {
   quitting = true;
   trayUpdate.cancel();
   clearInterval(updateTimer);
+  clearInterval(browseTimer);
   lagMonitor?.stop();
   await hosts?.stopAll();
   app.quit();
@@ -562,6 +632,14 @@ function registerIpc() {
     await runUpdate();
     return updateSummary(updates);
   });
+  // BBR-41: check the npm registry for a newer browse now; Upgrade (to the version that check found) or Roll back
+  // (to the pin) one host. The page names only the host, never a version.
+  ipcMain.handle('checkBrowse', async () => {
+    await runBrowseCheck();
+    return browseSummary();
+  });
+  ipcMain.handle('upgradeBrowse', (_e, id) => changeBrowse(id, true));
+  ipcMain.handle('rollbackBrowse', (_e, id) => changeBrowse(id, false));
   // Takes no argument from the page: it opens config.json and nothing else. openPath resolves to an error string.
   ipcMain.handle('openConfigFile', async () => {
     const err = await shell.openPath(store.path);

@@ -3,6 +3,7 @@ import {
   AGGREGATE_CLASS, AGGREGATE_GLYPH, GLYPH, actionsView, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, fmtRate,
   RELAY_LABEL, appMenuView, generalView, hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, pickSelected,
   transportText, withHostSnapshot, TEST_LABEL, aliasOptions, aliasWarning, parseTestForm, problemBar, testResultView, updateView,
+  browseView,
 } from './viewmodel.js';
 
 const $ = (id) => document.getElementById(id);
@@ -271,6 +272,7 @@ function render() {
   $('nextStepText').textContent = next;
   $('sbChecked').textContent = s.statusAt ? `${hostTitle(s)} checked ${fmtTime(s.statusAt)}` : 'Not checked yet';
 
+  renderBrowse(s);
   renderTraffic(s);
   renderPairing();
   renderMessages();
@@ -320,6 +322,51 @@ $('btnStartOverConfirm').onclick = async () => {
     await refresh();
   }
 };
+
+// ---------- the browse version per host (BBR-41; the decisions are in core/browseversion.js and viewmodel.js) ----------
+
+/** A Check Now for browse is on its way: its button stays disabled until it answers. */
+let browseChecking = false;
+
+function renderBrowse(s) {
+  const v = browseView(s, state?.browse);
+  $('browseWant').textContent = v.version;
+  $('browseUpstream').textContent = v.upstream || '—';
+  $('btnCheckBrowse').disabled = !v.canCheck || browseChecking;
+  $('btnUpgradeBrowse').hidden = !v.upgrade;
+  if (v.upgrade) {
+    $('btnUpgradeBrowse').textContent = v.upgrade.text;
+    $('btnUpgradeBrowse').title = `Install it on ${hostTitle(s)} only (${v.upgrade.note}), then check the version, auto-update off, loopback only and that the browser reconnects`;
+    $('btnUpgradeBrowse').disabled = !v.upgrade.enabled;
+  }
+  $('btnRollbackBrowse').hidden = !v.rollback;
+  if (v.rollback) {
+    $('btnRollbackBrowse').textContent = v.rollback.text;
+    $('btnRollbackBrowse').disabled = !v.rollback.enabled;
+  }
+  $('browseResult').hidden = !v.result;
+  if (v.result) {
+    $('browseResult').className = `msg ${v.result.kind}`;
+    $('browseResultText').textContent = v.result.text;
+  }
+}
+
+$('btnCheckBrowse').onclick = async () => {
+  browseChecking = true;
+  $('btnCheckBrowse').disabled = true;
+  try {
+    state = { ...state, browse: await bridge.checkBrowse() };
+  } catch (err) {
+    addFlash('bad', cleanError(err.message));
+  } finally {
+    browseChecking = false;
+  }
+  render();
+};
+// The outcome stays in the host's snapshot (browseChange) and shows under the buttons; the flash only says it finished.
+const browseOutcome = (r) => (r.ok ? ['ok', `browse ${r.version} verified.`] : ['bad', `browse ${r.version} did not verify: ${r.problems.join('; ')}`]);
+$('btnUpgradeBrowse').onclick = () => act((id) => bridge.upgradeBrowse(id), browseOutcome);
+$('btnRollbackBrowse').onclick = () => act((id) => bridge.rollbackBrowse(id), browseOutcome);
 
 function renderTraffic(s) {
   const t = s.traffic;
@@ -515,7 +562,7 @@ $('btnPair').onclick = () => {
 };
 $('btnRelay').onclick = () => act((id) => bridge.startRelay(id), (ok) => (ok ? ['ok', 'Relay restarted.'] : ['bad', 'The relay did not start — see the Log tab.']));
 $('btnSetup').onclick = () => act((id) => bridge.setup(id), (r) => (r.ok
-  ? ['ok', 'Host verified: pinned browse version, auto-update off, relay listening on loopback only.']
+  ? ['ok', `Host verified: browse ${r.version}, auto-update off, relay listening on loopback only.`]
   : ['bad', `Setup found problems: ${r.problems.join('; ')}`]));
 $('btnCopyCode').onclick = () => bridge.copy($('pairCode').textContent);
 $('btnCopyAddr').onclick = () => bridge.copy($('pairAddr').textContent);
