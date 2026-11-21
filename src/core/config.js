@@ -27,7 +27,7 @@ export const DEFAULTS = Object.freeze({
   innerPort: 19989,
   /** Relay port on the remote host until `browse status --json` reports the real one. */
   remotePort: 19988,
-  /** Path of the browse binary on the remote host. A leading $HOME/ is expanded remotely. */
+  /** Path of the browse binary on the remote host. A leading $HOME/ or ~/ is expanded remotely. */
   remoteBrowse: '$HOME/.local/bin/browse',
   /** Version setup installs and the warning state checks against. */
   browseVersion: PINNED_BROWSE_VERSION,
