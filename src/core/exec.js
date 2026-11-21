@@ -32,11 +32,11 @@ export function baseSshOptions(cfg) {
  * Run a child process and collect its output. Resolves (never rejects) with
  * { code, signal, stdout, stderr, timedOut } so callers handle every outcome.
  */
-export function run(cmd, args, { input = null, timeoutMs = 30_000, env = process.env } = {}) {
+export function run(cmd, args, { input = null, timeoutMs = 30_000, env = process.env, cwd = undefined } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(cmd, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawn(cmd, args, { env, cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (err) {
       resolve({ code: -1, signal: null, stdout: '', stderr: String(err), timedOut: false });
       return;

@@ -42,6 +42,11 @@ export const DEFAULTS = Object.freeze({
    * browser and count them by type. Off, relay → browser is never decoded.
    */
   countActions: false,
+  /**
+   * App-wide (BBR-43): check daily whether the source checkout is behind
+   * origin. Only a notice; nothing is installed without a click.
+   */
+  checkUpdates: true,
 });
 
 const PORT_KEYS = ['innerPort', 'remotePort'];
@@ -98,13 +103,14 @@ export function normalizeConfig(raw = {}) {
   cfg.pollSeconds = Number.isFinite(poll) && poll >= 2 ? poll : DEFAULTS.pollSeconds;
   cfg.autoConnect = Boolean(cfg.autoConnect);
   cfg.countActions = cfg.countActions === true;
+  cfg.checkUpdates = cfg.checkUpdates !== false;
   cfg.remoteBrowse = String(cfg.remoteBrowse || DEFAULTS.remoteBrowse);
   cfg.browseVersion = String(cfg.browseVersion || PINNED_BROWSE_VERSION);
   return cfg;
 }
 
 /** Settings that apply to the whole app, not to one host. */
-export const APP_KEYS = Object.freeze(['pollSeconds', 'browseVersion']);
+export const APP_KEYS = Object.freeze(['pollSeconds', 'browseVersion', 'checkUpdates']);
 
 /** Settings each host entry carries. `id` and `name` have no default; the rest fall back to DEFAULTS. */
 export const HOST_KEYS = Object.freeze(['id', 'name', 'host', 'transport', 'localAddress', 'innerPort', 'remotePort', 'remoteBrowse', 'sshOptions', 'autoConnect', 'countActions']);
@@ -210,14 +216,17 @@ export function normalizeAppConfig(raw = {}) {
       owner.set(bind, { id: h.id, key });
     }
   }
-  return { pollSeconds: app.pollSeconds, browseVersion: app.browseVersion, hosts };
+  // checkUpdates is app-only: hostConfig never passes it, so turning it off or on restarts no tunnel.
+  return { pollSeconds: app.pollSeconds, browseVersion: app.browseVersion, checkUpdates: app.checkUpdates, hosts };
 }
 
 /** One host's effective flat config: what Controller, the tunnel and the transport read. */
 export function hostConfig(app, id) {
   const h = app.hosts.find((x) => x.id === id);
   if (!h) throw new Error(`no host with id "${id}"`);
-  return normalizeConfig({ ...h, pollSeconds: app.pollSeconds, browseVersion: app.browseVersion });
+  // checkUpdates is app-wide (BBR-43): a host's config never carries it, so it cannot read as that host's setting.
+  const { checkUpdates: _app, ...flat } = normalizeConfig({ ...h, pollSeconds: app.pollSeconds, browseVersion: app.browseVersion });
+  return flat;
 }
 
 /**
@@ -232,10 +241,11 @@ export function withHostEdits(app, id, fields) {
 }
 
 /**
- * App-wide settings the window may change (BBR-45). `browseVersion` is not
- * one: the window shows the pin read-only, so no ipc call can move it.
+ * App-wide settings the window may change (BBR-45; checkUpdates, BBR-43).
+ * `browseVersion` is not one: the window shows the pin read-only, so no ipc
+ * call can move it.
  */
-export const APP_EDITABLE_KEYS = Object.freeze(['pollSeconds']);
+export const APP_EDITABLE_KEYS = Object.freeze(['pollSeconds', 'checkUpdates']);
 
 /**
  * The app config with app-wide fields replaced (e.g. by the General page).

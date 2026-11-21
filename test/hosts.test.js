@@ -485,7 +485,7 @@ test('hosts: a new poll interval from General is saved and reaches every control
 
   // browseVersion is read-only in the window: an ipc caller cannot move the pin through editApp.
   const res = await mgr.editApp({ pollSeconds: 30, browseVersion: '9.9.9', hosts: [] }, save);
-  assert.deepEqual(res, { pollSeconds: 30, browseVersion: PINNED_BROWSE_VERSION });
+  assert.deepEqual(res, { pollSeconds: 30, browseVersion: PINNED_BROWSE_VERSION, checkUpdates: true });
   const stored = JSON.parse(readFileSync(path, 'utf8'));
   assert.equal(stored.pollSeconds, 30);
   assert.equal('browseVersion' in stored, false, 'the pin is not written');
@@ -501,6 +501,29 @@ test('hosts: a new poll interval from General is saved and reaches every control
   await mgr.editHost('dev005', { remotePort: 20088 }, save);
   assert.notEqual(mgr.get('dev005'), b, 'a changed relay port rebuilds the controller');
   assert.equal(mgr.get('dev005').cfg.pollSeconds, 30);
+});
+
+test('hosts: Check for updates from General is saved only when off, and restarts no host (BBR-43)', async () => {
+  const { mgr, calls } = stubManager();
+  const path = join(mkdtempSync(join(tmpdir(), 'bb-upd-')), 'config.json');
+  const save = (cfg) => saveConfig(path, cfg);
+  await mgr.apply({ hosts: [sshHost('dev004', '127.0.0.1', 19989), sshHost('dev005', '127.0.0.2', 19991)] });
+  const [a, b] = [mgr.get('dev004'), mgr.get('dev005')];
+  assert.equal(mgr.config.checkUpdates, true, 'on by default');
+  calls.length = 0;
+
+  const off = await mgr.editApp({ checkUpdates: false }, save);
+  assert.equal(off.checkUpdates, false);
+  assert.equal(mgr.config.checkUpdates, false);
+  assert.equal(JSON.parse(readFileSync(path, 'utf8')).checkUpdates, false, 'off is written');
+  assert.equal(mgr.get('dev004'), a, 'dev004 keeps its controller');
+  assert.equal(mgr.get('dev005'), b, 'dev005 keeps its controller');
+  assert.deepEqual(calls, [], 'no tunnel was disconnected, reconnected or re-polled');
+  assert.equal('checkUpdates' in a.cfg, false, 'a host config never carries the app-wide setting');
+
+  await mgr.editApp({ checkUpdates: true }, save);
+  assert.equal('checkUpdates' in JSON.parse(readFileSync(path, 'utf8')), false, 'the default is not written');
+  assert.deepEqual(calls, []);
 });
 
 test('hosts: removing a host stops only that host; the last host cannot be removed', async () => {

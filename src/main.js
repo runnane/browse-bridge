@@ -13,6 +13,7 @@ import { readVersion } from './core/version.js';
 import { aboutInfo, linkUrl } from './core/about.js';
 import { readSshAliases } from './core/sshconfig.js';
 import { testConnection } from './core/sshtest.js';
+import { UPDATE_CHECK_INTERVAL_MS, checkForUpdate, performUpdate, updateSummary } from './core/updater.js';
 import { iconPng, trayIconPng } from './icons.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -47,6 +48,11 @@ let quitting = false;
 let lagMonitor = null;
 /** "0.1.0+3 1b86d65", read once at start-up (core/version.js); shown in the tray tooltip and menu and the window's status bar. */
 let appVersion = '';
+/** The source checkout this app runs from: what readVersion reads and the updater fast-forwards. */
+const appDir = join(here, '..');
+/** The updater's state (BBR-43); core/updater.js's updateSummary turns it into what the window and tray show. */
+const updates = { enabled: true, checking: false, updating: false, result: null, outcome: null };
+let updateTimer = null;
 
 const paths = () => {
   const dir = app.getPath('userData');
@@ -80,7 +86,7 @@ async function start() {
   logger = new Logger({ file: p.log });
   store = new ConfigStore(p.config);
   const config = openConfig();
-  appVersion = await readVersion(join(here, '..')); // bounded: each git call has a short timeout
+  appVersion = await readVersion(appDir); // bounded: each git call has a short timeout
   lagMonitor = createLagMonitor(logger);
   lagMonitor.start();
   hosts = new HostManager({ logger, controlDir: p.control });
@@ -123,6 +129,8 @@ async function start() {
   // A launch by hand shows the window; only the login autostart (--hidden) starts in the tray.
   // An unreadable config file always shows the window: it carries the error and the Reload / Start over choice.
   if (!startsHidden(process.argv) || hosts.snapshot().overall === 'none' || store.failure) showWindow();
+  // Not awaited: a slow fetch must not hold start-up. Then every 24 h while the setting is on.
+  scheduleUpdateChecks();
   if (process.env.BB_SMOKE_OUT) smoke(process.env.BB_SMOKE_OUT);
   if (process.env.BB_PROBE_WINDOW) probeWindow(process.env.BB_PROBE_WINDOW);
 }
@@ -148,8 +156,102 @@ function openConfig() {
  * could not be read, and the app-wide settings the General page shows (BBR-45).
  */
 function appState() {
-  const app = hosts.config ? { pollSeconds: hosts.config.pollSeconds, browseVersion: hosts.config.browseVersion, configPath: store.path } : null;
-  return { ...hosts.snapshot(), configFailure: store.failure, app };
+  const app = hosts.config
+    ? { pollSeconds: hosts.config.pollSeconds, browseVersion: hosts.config.browseVersion, checkUpdates: hosts.config.checkUpdates, configPath: store.path }
+    : null;
+  return { ...hosts.snapshot(), configFailure: store.failure, app, update: updateSummary(updates) };
+}
+
+// ---------- updates for a source checkout (BBR-43; the decisions are in core/updater.js) ----------
+
+/**
+ * Follow the Check for updates setting: check now and every 24 h when on;
+ * when off, stop the timer and drop the notice. A packaged build is updated
+ * by its package, and the headless test hooks never fetch: BB_SMOKE_UPDATE=N
+ * shows N fake commits instead, so the smoke run can render the notice.
+ */
+function scheduleUpdateChecks() {
+  clearInterval(updateTimer);
+  updateTimer = null;
+  if (app.isPackaged) {
+    updates.result = { status: 'unsupported', reason: 'this is a packaged build, updated by its package' };
+  } else if (process.env.BB_SMOKE_OUT || process.env.BB_PROBE_WINDOW) {
+    const n = Number(process.env.BB_SMOKE_UPDATE);
+    updates.result = n > 0
+      ? { status: 'available', branch: 'main', behind: n, ahead: 0, subjects: ['fix(smoke): a sample commit subject'] }
+      : { status: 'unsupported', reason: 'the headless test hooks do not fetch' };
+  } else {
+    updates.enabled = hosts.config?.checkUpdates !== false;
+    if (!updates.enabled) {
+      updates.result = null;
+      updates.outcome = null;
+    } else {
+      runUpdateCheck();
+      updateTimer = setInterval(runUpdateCheck, UPDATE_CHECK_INTERVAL_MS);
+      updateTimer.unref?.();
+    }
+  }
+  trayUpdate.run();
+}
+
+/** Check for updates was turned on or off by a save or a re-read config.json: start or stop the daily check now. */
+function followUpdateSetting(before) {
+  if (hosts.config?.checkUpdates !== before) scheduleUpdateChecks();
+}
+
+/** One check; a second one while a check or an update runs is dropped. Never throws. */
+async function runUpdateCheck() {
+  if (!updates.enabled || updates.checking || updates.updating || app.isPackaged) return;
+  updates.checking = true;
+  trayUpdate.run();
+  try {
+    const result = await checkForUpdate(appDir);
+    // The setting may have been turned off while the fetch ran.
+    if (updates.enabled) updates.result = result;
+    const what = result.status === 'available' ? `${result.behind} new commit(s) on origin/${result.branch}`
+      : result.status === 'current' ? `up to date with origin/${result.branch}`
+        : result.status === 'failed' ? `could not check: ${result.reason}` : `not checked: ${result.reason}`;
+    (result.status === 'failed' ? logger.warn : logger.info).call(logger, 'update', `update check: ${what}${result.branchSource && result.branchSource !== 'origin/HEAD' ? ` (default branch from ${result.branchSource})` : ''}`);
+  } catch (err) {
+    report(err);
+  } finally {
+    updates.checking = false;
+    trayUpdate.run();
+  }
+}
+
+/**
+ * The user's click: fast-forward, install if the dependencies changed, then
+ * relaunch through the launcher (bin/browse-bridge, so a new Electron is
+ * fetched and the sandbox flag chosen again) after the clean quit() that stops
+ * every host. A refusal is kept for the About dialog and nothing restarts.
+ */
+async function runUpdate() {
+  if (updates.updating || updates.checking) throw new Error('An update check or an update is already running; try again in a moment.');
+  if (app.isPackaged) throw new Error('A packaged build is updated by its package.');
+  updates.updating = true;
+  updates.outcome = null;
+  trayUpdate.run();
+  let res;
+  try {
+    res = await performUpdate(appDir);
+  } catch (err) {
+    res = { ok: false, refusal: 'failed', message: `Not updated: ${err.message}`, relaunch: false };
+  }
+  (res.ok ? logger.info : logger.warn).call(logger, 'update', res.message);
+  if (res.relaunch) {
+    // Still "updating" while every host stops, so the button does not come back live before the restart.
+    app.relaunch({ execPath: menuArgv()[0], args: [] });
+    await quit();
+    return res;
+  }
+  updates.updating = false;
+  updates.outcome = { ok: res.ok, message: res.message };
+  // The checkout may have moved (merged, then the install failed): check again rather than show the old count.
+  if (res.updated || res.ok) updates.result = null;
+  trayUpdate.run();
+  if (res.updated || res.ok) runUpdateCheck();
+  return res;
 }
 
 /** Test hook: after start-up settles, record whether a window was opened, then quit. */
@@ -205,6 +307,7 @@ async function smoke(outPrefix) {
     const p = document.getElementById('generalPage');
     return { shown: !p.hidden, tabsHidden: document.querySelector('.tabs').hidden, text: p.innerText,
       pollSeconds: document.getElementById('fPoll').value, autostart: document.getElementById('autostart').checked,
+      checkUpdates: document.getElementById('checkUpdates').checked, updateBar: document.getElementById('sbUpdate').hidden ? null : document.getElementById('sbUpdate').textContent,
         appMenu: { visible: !document.getElementById('appMenuRow').hidden, checked: document.getElementById('appMenu').checked } };
   })()`);
   // The first host's Settings with the Advanced section expanded (it is collapsed by default), and its field values.
@@ -263,7 +366,9 @@ function trayChanged() {
 function renderTray() {
   if (!trayRenderer || quitting) return;
   try {
-    trayRenderer.render(trayView(hosts.snapshot(), { autostart: isAutostartEnabled(), version: appVersion, configFailure: store?.failure ?? null }));
+    trayRenderer.render(trayView(hosts.snapshot(), {
+      autostart: isAutostartEnabled(), version: appVersion, configFailure: store?.failure ?? null, update: updateSummary(updates).line,
+    }));
   } catch (err) {
     report(err);
   }
@@ -376,6 +481,7 @@ function showWindow(focus = null) {
 async function quit() {
   quitting = true;
   trayUpdate.cancel();
+  clearInterval(updateTimer);
   lagMonitor?.stop();
   await hosts?.stopAll();
   app.quit();
@@ -394,8 +500,10 @@ function registerIpc() {
     await hosts.queue;
     const config = openConfig();
     if (!store.failure) {
+      const before = hosts.config?.checkUpdates;
       await hosts.apply(config);
       logger.info('config', `${store.path} read again`);
+      followUpdateSetting(before);
     }
     trayChanged();
     return appState();
@@ -405,7 +513,9 @@ function registerIpc() {
     await hosts.queue;
     const clean = store.startOver();
     logger.info('config', `started over: ${store.path} now holds one empty host`);
+    const before = hosts.config?.checkUpdates;
     await hosts.apply(clean);
+    followUpdateSetting(before);
     trayChanged();
     return appState();
   });
@@ -437,9 +547,20 @@ function registerIpc() {
   });
   // The General page (BBR-45): app-wide settings go through the same store; only the poll interval is editable.
   ipcMain.handle('saveAppSettings', async (_e, raw) => {
+    const before = hosts.config?.checkUpdates;
     const clean = await hosts.editApp(raw, save);
-    logger.info('config', `saved app settings (poll every ${clean.pollSeconds}s)`);
+    logger.info('config', `saved app settings (poll every ${clean.pollSeconds}s, update check ${clean.checkUpdates ? 'on' : 'off'})`);
+    followUpdateSetting(before);
     return clean;
+  });
+  // BBR-43: Check Now, and Update and Restart. Both answer with what the window shows (updater.js updateSummary).
+  ipcMain.handle('checkForUpdates', async () => {
+    await runUpdateCheck();
+    return updateSummary(updates);
+  });
+  ipcMain.handle('updateNow', async () => {
+    await runUpdate();
+    return updateSummary(updates);
   });
   // Takes no argument from the page: it opens config.json and nothing else. openPath resolves to an error string.
   ipcMain.handle('openConfigFile', async () => {

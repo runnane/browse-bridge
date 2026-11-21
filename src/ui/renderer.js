@@ -2,7 +2,7 @@
 import {
   AGGREGATE_CLASS, AGGREGATE_GLYPH, GLYPH, actionsView, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, fmtRate,
   RELAY_LABEL, appMenuView, generalView, hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, pickSelected,
-  transportText, withHostSnapshot, TEST_LABEL, aliasOptions, aliasWarning, parseTestForm, problemBar, testResultView,
+  transportText, withHostSnapshot, TEST_LABEL, aliasOptions, aliasWarning, parseTestForm, problemBar, testResultView, updateView,
 } from './viewmodel.js';
 
 const $ = (id) => document.getElementById(id);
@@ -234,6 +234,7 @@ function render() {
   $('sbLabel').textContent = state.hosts.length > 1 ? state.label : (s?.label ?? state.label);
   renderConfigFailure();
   renderGeneral();
+  renderUpdate();
   if (!s) return;
 
   const g = GLYPH[s.overall] ?? '?';
@@ -752,7 +753,66 @@ function renderGeneral() {
   $('gPinNote').textContent = v.pinNote;
   $('gConfigPath').textContent = v.configPath;
   if (!generalDirty && document.activeElement !== $('fPoll')) $('fPoll').value = v.pollSeconds;
+  // The box follows config.json, except while its own save is on the way.
+  if (!checkUpdatesSaving) $('checkUpdates').checked = v.checkUpdates;
 }
+
+// ---------- updates (BBR-43): the notice in the status bar and About; the decisions are in core/updater.js ----------
+
+/** Check for updates saves on change, like Start at login, through the same app-settings save as the poll interval. */
+let checkUpdatesSaving = false;
+
+function renderUpdate() {
+  const v = updateView(state?.update);
+  $('sbUpdate').hidden = !v.bar;
+  $('sbUpdate').textContent = v.bar ?? '';
+  $('aboutUpdateText').textContent = v.text;
+  const list = $('aboutUpdateSubjects');
+  const key = JSON.stringify(v.subjects);
+  if (list.dataset.key !== key) {
+    list.dataset.key = key;
+    list.replaceChildren(...v.subjects.map((s) => Object.assign(document.createElement('li'), { textContent: s })));
+  }
+  list.hidden = !v.subjects.length;
+  $('btnUpdateNow').hidden = !v.showUpdate;
+  $('btnUpdateNow').disabled = !v.canUpdate;
+  $('btnCheckUpdates').disabled = !v.canCheck;
+}
+
+$('sbUpdate').onclick = () => openInfo('about');
+$('btnCheckUpdates').onclick = async () => {
+  $('btnCheckUpdates').disabled = true;
+  try {
+    state = { ...state, update: await bridge.checkForUpdates() };
+  } catch (err) {
+    $('aboutUpdateText').textContent = cleanError(err.message);
+  }
+  render();
+};
+// The About dialog covers the flash bars, so the outcome (a refusal and its reason) shows in the dialog's own text.
+$('btnUpdateNow').onclick = async () => {
+  $('btnUpdateNow').disabled = true;
+  $('btnCheckUpdates').disabled = true;
+  $('aboutUpdateText').textContent = 'Updating browse-bridge…';
+  try {
+    state = { ...state, update: await bridge.updateNow() };
+    render();
+  } catch (err) {
+    $('aboutUpdateText').textContent = cleanError(err.message);
+  }
+};
+$('checkUpdates').addEventListener('change', async (ev) => {
+  checkUpdatesSaving = true;
+  try {
+    await bridge.saveAppSettings({ checkUpdates: ev.target.checked });
+    await refresh();
+  } catch (err) {
+    showGeneralError(cleanError(err.message));
+  } finally {
+    checkUpdatesSaving = false;
+    renderGeneral();
+  }
+});
 
 /** Discard unapplied edits and show what the config holds. */
 function fillGeneral() {
@@ -765,7 +825,7 @@ function fillGeneral() {
 
 $('general').addEventListener('input', (ev) => {
   // Start at login and Show in application menu save on change, on their own; they never make the form dirty.
-  if (ev.target.id === 'autostart' || ev.target.id === 'appMenu') return;
+  if (ev.target.id === 'autostart' || ev.target.id === 'appMenu' || ev.target.id === 'checkUpdates') return;
   setGeneralDirty(true);
 });
 $('general').addEventListener('submit', async (ev) => {

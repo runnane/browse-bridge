@@ -57,7 +57,9 @@ export function pickSelected(hosts, selectedId) {
 }
 
 /** Shared with core (tray, controller) so a message and the control it names cannot drift; see core/labels.js. */
-export { SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME, TEST_LABEL, SSH_OPTIONS_LABEL } from '../core/labels.js';
+export {
+  SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME, TEST_LABEL, SSH_OPTIONS_LABEL, CHECK_UPDATES_LABEL, UPDATE_LABEL, CHECK_NOW_LABEL,
+} from '../core/labels.js';
 
 /**
  * The message bar for a host's recognised ssh failure (snapshot `problem`,
@@ -353,9 +355,28 @@ export function generalView(app) {
   if (!app) return null;
   return {
     pollSeconds: String(app.pollSeconds),
+    checkUpdates: app.checkUpdates !== false,
     browseVersion: app.browseVersion,
     pinNote: 'Set Up Host installs this version on each host and warns when a host runs another. Changing it from here is not built yet (BBR-41); a new browse-bridge release moves it.',
     configPath: app.configPath,
+  };
+}
+
+/**
+ * The update notice (BBR-43) from the state's `update` block (core/updater.js
+ * updateSummary): the status bar's button (hidden when `bar` is null), the
+ * About dialog's text and commit subjects, and which of its buttons show.
+ * Before main has sent it, nothing shows and nothing can be clicked.
+ */
+export function updateView(update) {
+  if (!update) return { bar: null, text: '', subjects: [], showUpdate: false, canUpdate: false, canCheck: false };
+  return {
+    bar: update.line ?? null,
+    text: update.detail ?? '',
+    subjects: Array.isArray(update.subjects) ? update.subjects : [],
+    showUpdate: Boolean(update.canUpdate) || (Boolean(update.busy) && update.line !== null),
+    canUpdate: Boolean(update.canUpdate),
+    canCheck: Boolean(update.canCheck),
   };
 }
 

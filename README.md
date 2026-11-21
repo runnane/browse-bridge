@@ -117,6 +117,20 @@ page). It prints the `chown`/`chmod` that keeps the sandbox, if you prefer.
 On pnpm 10 the install skips Electron's download; `bin/browse-bridge`
 fetches it on first launch (one-off, ~100 MB).
 
+### Updating
+
+With **Check for updates** on (General; the default), the app fetches the
+checkout's default branch at start-up and once a day, with no prompt (ssh
+`BatchMode=yes`), and shows **Update available: N commits** in the status bar,
+the tray and About. Nothing is installed until you click
+**Update and Restart** in About: it fast-forwards the checkout (`git merge --ff-only`), runs
+`npm install` or `pnpm install` (whichever installed `node_modules`) only when
+`package.json` or a lockfile changed, then stops every host and restarts. It
+refuses, changing nothing, when a tracked file has local changes, the checkout
+is not on the default branch, or it has commits of its own. A failed fetch
+reads "Could not check for updates", never "up to date". By hand, the same is
+`git pull --ff-only`, then the install if the lockfile changed, then a restart.
+
 ## First run
 
 Use the **plain** host (e.g. `jon@dev004`), not an alias that carries a
@@ -176,6 +190,7 @@ App-wide (the **General** page, below the host list):
 | --- | --- | --- | --- |
 | `browseVersion` | 0.1.4 | General, read-only | pinned version setup installs and checks |
 | `pollSeconds` | 10 | General | status poll interval in seconds (2 to 3600 in the window); a change reconnects no host |
+| `checkUpdates` | true | General | check daily whether origin has a newer browse-bridge (see Updating); saves on tick, reconnects no host |
 
 Start at login is on the General page too. It is not a config key: it is the
 XDG autostart entry, and it saves as soon as you tick it.

@@ -5,7 +5,10 @@ import { normalizeConfig } from '../src/core/config.js';
 import { Controller } from '../src/core/controller.js';
 import { Logger } from '../src/core/log.js';
 import { trayMenuModel } from '../src/core/tray.js';
-import { SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME, TEST_LABEL, SSH_OPTIONS_LABEL } from '../src/core/labels.js';
+import {
+  SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME, TEST_LABEL, SSH_OPTIONS_LABEL, CHECK_UPDATES_LABEL, UPDATE_LABEL, CHECK_NOW_LABEL,
+} from '../src/core/labels.js';
+import { updateSummary } from '../src/core/updater.js';
 import { classifySshError } from '../src/core/ssherror.js';
 import * as viewmodel from '../src/ui/viewmodel.js';
 
@@ -43,6 +46,22 @@ test('labels: the ssh guidance names the SSH options field, and Test Connection,
   assert.equal(viewmodel.SSH_OPTIONS_LABEL, SSH_OPTIONS_LABEL);
   // Test Connection's advice that names Set Up Host reads it from labels.js too (test/sshtest.test.js pins the sentences).
   assert.match(readFileSync(new URL('../src/core/sshtest.js', import.meta.url), 'utf8'), /\$\{SETUP_LABEL\} installs/);
+});
+
+test('labels: the update controls in index.html carry the names the messages use (BBR-43)', () => {
+  assert.equal(CHECK_UPDATES_LABEL, 'Check for updates');
+  assert.equal(UPDATE_LABEL, 'Update and Restart');
+  assert.equal(CHECK_NOW_LABEL, 'Check Now');
+  assert.equal(html.match(/<input type="checkbox" id="checkUpdates">([^<]*)</)?.[1], CHECK_UPDATES_LABEL);
+  assert.equal(html.match(/id="btnUpdateNow"[^>]*>([^<]*)</)?.[1], UPDATE_LABEL);
+  assert.equal(html.match(/id="btnCheckUpdates"[^>]*>([^<]*)</)?.[1], CHECK_NOW_LABEL);
+  // The off notice names the checkbox; the page's hint and the README name the update button.
+  assert.ok(updateSummary({ enabled: false }).detail.includes(`General → ${CHECK_UPDATES_LABEL}`));
+  assert.ok(html.includes(`click ${UPDATE_LABEL} in About`));
+  assert.ok(readme.includes(`**${UPDATE_LABEL}**`));
+  assert.ok(readme.includes(`**${CHECK_UPDATES_LABEL}**`));
+  assert.equal(viewmodel.UPDATE_LABEL, UPDATE_LABEL);
+  assert.equal(viewmodel.CHECK_UPDATES_LABEL, CHECK_UPDATES_LABEL);
 });
 
 test('labels: the extension is called OpenCode Browse where a person is told to find it', () => {

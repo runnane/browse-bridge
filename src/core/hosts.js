@@ -186,13 +186,14 @@ export class HostManager extends EventEmitter {
   /**
    * Replace app-wide settings (from the window's General page), persist with
    * `save` and apply. Only APP_EDITABLE_KEYS are taken. A new poll interval
-   * restarts no tunnel. Returns { pollSeconds, browseVersion }.
+   * restarts no tunnel, and neither does checkUpdates (BBR-43), which no host
+   * carries. Returns { pollSeconds, browseVersion, checkUpdates }.
    */
   async editApp(fields, save = normalizeAppConfig) {
     await this.queue;
     const clean = save(withAppEdits(this.config, fields));
     await this.apply(clean);
-    return { pollSeconds: clean.pollSeconds, browseVersion: clean.browseVersion };
+    return { pollSeconds: clean.pollSeconds, browseVersion: clean.browseVersion, checkUpdates: clean.checkUpdates };
   }
 
   /** Remove one host: its controller is disconnected and dropped. The last host is refused. */

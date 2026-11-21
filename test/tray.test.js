@@ -151,6 +151,15 @@ function fakeTray() {
   return { calls, renderer };
 }
 
+test('tray: an update on origin is one line near the top that opens About; none without one (BBR-43)', () => {
+  const a = agg(host('dev004', 'ready'));
+  const menu = trayMenuModel(a, { update: 'Update available: 3 commits' });
+  assert.deepEqual(menu[1], { label: 'Update available: 3 commits', action: 'showAbout' });
+  assert.equal(menu.length, trayMenuModel(a).length + 1);
+  assert.deepEqual(trayMenuModel(a, { update: null }), trayMenuModel(a));
+  assert.deepEqual(trayView(a, { update: 'Update available: 1 commit' }).menu[1].label, 'Update available: 1 commit');
+});
+
 test('tray: an unchanged view makes no tray call; each part is set only when it changed', () => {
   const { calls, renderer } = fakeTray();
   const two = agg(host('dev004', 'ready'), host('dev005', 'stopped'));
