@@ -1,7 +1,7 @@
 /* global bridge */
 import {
   AGGREGATE_CLASS, AGGREGATE_GLYPH, GLYPH, actionsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, fmtRate,
-  hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseHostForm, pickSelected, withHostSnapshot,
+  RELAY_LABEL, hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseHostForm, pickSelected, withHostSnapshot,
 } from './viewmodel.js';
 
 const $ = (id) => document.getElementById(id);
@@ -447,7 +447,7 @@ async function act(fn, describe) {
 
 $('btnConnect').onclick = () => act((id) => (selected()?.connected ? bridge.disconnect(id) : bridge.connect(id)));
 $('btnPair').onclick = () => {
-  act((id) => bridge.pair(id), (p) => (p ? null : ['bad', 'No pairing code came back. Is the relay running? Try Restart Relay, then see the Log tab.']));
+  act((id) => bridge.pair(id), (p) => (p ? null : ['bad', `No pairing code came back. Is the relay running? Try ${RELAY_LABEL}, then see the Log tab.`]));
 };
 $('btnRelay').onclick = () => act((id) => bridge.startRelay(id), (ok) => (ok ? ['ok', 'Relay restarted.'] : ['bad', 'The relay did not start — see the Log tab.']));
 $('btnSetup').onclick = () => act((id) => bridge.setup(id), (r) => (r.ok

@@ -66,7 +66,7 @@ test('help: every control it tells you to click exists under that name outside t
   const rest = html.replace(help, '');
   const named = new Set([...help.matchAll(/<b>([^<]+)<\/b>/g)].map((m) => m[1]));
   // Words the help puts in bold that are not this window's controls: the extension's own UI, tab names (data-tab), states.
-  const elsewhere = new Set(['Connected', 'advanced', 'Pair with a code', 'browse', 'Status', 'Traffic', 'Log', 'Settings', 'Quit', 'Connect']);
+  const elsewhere = new Set(['Connected', 'advanced', 'Pair with a code', 'browse', 'OpenCode Browse', 'Status', 'Traffic', 'Log', 'Settings', 'Quit', 'Connect']);
   const unchecked = [...named].filter((n) => !elsewhere.has(n));
   assert.ok(unchecked.includes('Set Up Host') && unchecked.includes('Pair Browser…'), 'the toolbar names are checked');
   // A button reads ">Name<"; a form field's label reads ">Name:<".

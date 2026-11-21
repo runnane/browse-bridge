@@ -9,6 +9,8 @@
  * changed, and `coalesce` folds a burst of change events into one render.
  */
 
+import { RELAY_LABEL, SETUP_LABEL } from './labels.js';
+
 /** A host's display name: its name, else its id. Same rule as the window's hostTitle. */
 export function hostTitle(snap) {
   return snap.name || snap.id || 'host';
@@ -82,8 +84,8 @@ function hostSubmenu(h) {
         ? { label: 'Disconnect', action: 'disconnect', hostId }
         : { label: 'Connect', enabled: configured, action: 'connect', hostId },
       { label: 'Pair browser…', enabled: idle, action: 'pair', hostId, show: true },
-      { label: 'Start relay', enabled: idle, action: 'startRelay', hostId },
-      { label: 'Set up remote host', enabled: idle, action: 'setup', hostId, show: true },
+      { label: RELAY_LABEL, enabled: idle, action: 'startRelay', hostId },
+      { label: SETUP_LABEL, enabled: idle, action: 'setup', hostId, show: true },
       { type: 'separator' },
       { label: 'Show logs', action: 'showLogs', hostId },
     ],

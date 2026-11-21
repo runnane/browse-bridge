@@ -89,8 +89,8 @@ test('tray: each host gets a submenu of its own controls, bound to its id; app-w
 
   const [a, b] = [menu[2].submenu, menu[3].submenu];
   assert.deepEqual(actions(a), [
-    ['Disconnect', 'disconnect', 'dev004'], ['Pair browser…', 'pair', 'dev004'], ['Start relay', 'startRelay', 'dev004'],
-    ['Set up remote host', 'setup', 'dev004'], ['Show logs', 'showLogs', 'dev004'],
+    ['Disconnect', 'disconnect', 'dev004'], ['Pair browser…', 'pair', 'dev004'], ['Restart Relay', 'startRelay', 'dev004'],
+    ['Set Up Host', 'setup', 'dev004'], ['Show logs', 'showLogs', 'dev004'],
   ]);
   assert.deepEqual(actions(b).map(([l, act, id]) => [l, act, id]).slice(0, 1), [['Connect', 'connect', 'dev005']]);
   assert.ok(actions(b).every(([, , id]) => id === 'dev005'), 'every control in dev005\'s submenu acts on dev005');
