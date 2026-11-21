@@ -111,6 +111,24 @@ test('tray: a busy or unconfigured host\'s controls are disabled; warnings show 
   assert.equal(blank.find((i) => i.action === 'connect').enabled, false);
 });
 
+test('tray: an unreadable config file gets a line naming the file and the error, in the menu and the tooltip (BBR-36)', () => {
+  const failure = { path: '/cfg/browse-bridge/config.json', message: 'Expected double-quoted property name in JSON at position 120', backup: null, backupError: null };
+  const a = agg(host('host-1', 'unconfigured', { host: '' }));
+  const menu = trayMenuModel(a, { configFailure: failure });
+  assert.deepEqual(menu[1], {
+    label: '⚠ Cannot read /cfg/browse-bridge/config.json: Expected double-quoted property name in JSON at position 120',
+    action: 'showWindow',
+  });
+  assert.equal(trayTooltip(a, { configFailure: failure }).split('\n')[1], menu[1].label);
+  // Without a failure the menu and tooltip are exactly what they were.
+  assert.deepEqual(trayMenuModel(a, { configFailure: null }), trayMenuModel(a));
+  assert.equal(menu.length, trayMenuModel(a).length + 1);
+  // A long message is cut to fit a menu.
+  const long = trayMenuModel(a, { configFailure: { ...failure, message: 'x'.repeat(500) } })[1].label;
+  assert.equal(long.length, 120);
+  assert.ok(long.endsWith('…'));
+});
+
 // ---------- coalescing ----------
 
 function fakeTray() {

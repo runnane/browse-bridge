@@ -63,6 +63,10 @@
   .msg.bad { border-color: var(--bad); background: var(--bad-bg); }
   .msg .x { border: none; background: none; color: var(--muted); font-size: 14px; line-height: 1; padding: 0 2px; }
   .msg .x:hover { color: var(--text); }
+  /* The unreadable-config bar (BBR-36): static, so its buttons survive the 1 s re-render of #messages. */
+  #configFailure { margin: 6px 8px 0; flex-wrap: wrap; }
+  #configFailure[hidden] { display: none; }
+  #configFailure .msg-buttons { display: flex; gap: 6px; flex: 0 0 auto; }
 
   /* Tabs (Plasma style: highlight line under the active tab) */
   .tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--frame); }
@@ -222,6 +226,13 @@
     </div>
   </nav>
   <div class="content">
+  <div class="msg bad" id="configFailure" role="alert" hidden>
+    <p id="configFailureText"></p>
+    <div class="msg-buttons">
+      <button class="btn" id="btnConfigReload" title="Read the config file again, after fixing it">Reload</button>
+      <button class="btn" id="btnConfigStartOver" title="Replace the config file with one empty host; the unreadable file is kept">Start Over…</button>
+    </div>
+  </div>
   <div id="messages" aria-live="polite"></div>
 
   <div class="tabs" role="tablist">
@@ -350,6 +361,12 @@
     <div class="dlg-title">Remove Host</div>
     <div class="dlg-body"><p style="margin:0" id="removeText"></p></div>
     <div class="dlg-buttons"><button class="btn" id="btnRemoveCancel">Cancel</button><button class="btn default" id="btnRemoveConfirm">Remove</button></div>
+  </dialog>
+
+  <dialog id="startOverDialog">
+    <div class="dlg-title">Start Over</div>
+    <div class="dlg-body"><p style="margin:0" id="startOverText"></p></div>
+    <div class="dlg-buttons"><button class="btn default" id="btnStartOverCancel">Cancel</button><button class="btn" id="btnStartOverConfirm">Start Over</button></div>
   </dialog>
 
   <dialog id="helpDialog" class="info wide" aria-labelledby="helpTitle">

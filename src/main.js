@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu, Notification, Tray, clipboard, ipcMain, nativeImage, nativeTheme, shell } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, normalizeAppConfig, pairingAddress, saveConfig } from './core/config.js';
+import { ConfigStore, normalizeAppConfig, pairingAddress } from './core/config.js';
 import { Logger } from './core/log.js';
 import { timed, createLagMonitor } from './core/stall.js';
 import { HOST_ACTIONS, HostManager, runHostAction } from './core/hosts.js';
@@ -37,6 +37,8 @@ let hosts = null;
 /** The first host's controller: only the smoke hook's BB_SMOKE_PAIR still uses it. */
 const ctl = () => hosts.primary();
 let logger = null;
+/** config.json's one read/write path; refuses to write over a file that did not load (BBR-36). */
+let store = null;
 let quitting = false;
 let lagMonitor = null;
 /** "0.1.0+3 1b86d65", read once at start-up (core/version.js); shown in the tray tooltip and menu and the window's status bar. */
@@ -67,15 +69,8 @@ function trayIcon(state) {
 async function start() {
   const p = paths();
   logger = new Logger({ file: p.log });
-  let config;
-  try {
-    config = loadConfig(p.config);
-  } catch (err) {
-    logger.error('config', `config unreadable, using defaults: ${err.message}`);
-    config = loadConfig('/nonexistent');
-  }
-  // An empty list gets a blank host in memory, so the window has a Settings form to fill in.
-  if (!config.hosts.length) config = normalizeAppConfig({ ...config, hosts: [{}] });
+  store = new ConfigStore(p.config);
+  const config = openConfig();
   appVersion = await readVersion(join(here, '..')); // bounded: each git call has a short timeout
   lagMonitor = createLagMonitor(logger);
   lagMonitor.start();
@@ -111,9 +106,31 @@ async function start() {
   // Keep an existing login entry in the current form (earlier releases wrote it without --hidden).
   if (isAutostartEnabled()) setAutostart(true, launchArgv());
   // A launch by hand shows the window; only the login autostart (--hidden) starts in the tray.
-  if (!startsHidden(process.argv) || hosts.snapshot().overall === 'none') showWindow();
+  // An unreadable config file always shows the window: it carries the error and the Reload / Start over choice.
+  if (!startsHidden(process.argv) || hosts.snapshot().overall === 'none' || store.failure) showWindow();
   if (process.env.BB_SMOKE_OUT) smoke(process.env.BB_SMOKE_OUT);
   if (process.env.BB_PROBE_WINDOW) probeWindow(process.env.BB_PROBE_WINDOW);
+}
+
+/**
+ * Read config.json through the store. An unreadable file leaves one blank host
+ * in memory and the store failed, so nothing is saved over it (BBR-36).
+ */
+function openConfig() {
+  let config = store.open();
+  const f = store.failure;
+  if (f) {
+    const kept = f.backup ? `a copy is kept at ${f.backup}` : `it could not be copied aside (${f.backupError ?? 'not found'})`;
+    logger.error('config', `${f.path} could not be read; ${kept}; nothing is saved over it until it reads again or Start over is chosen: ${f.message}`);
+  }
+  // An empty list gets a blank host in memory, so the window has a Settings form to fill in.
+  if (!config.hosts.length) config = normalizeAppConfig({ ...config, hosts: [{}] });
+  return config;
+}
+
+/** What the window's state call returns: the hosts, and whether the config file could not be read. */
+function appState() {
+  return { ...hosts.snapshot(), configFailure: store.failure };
 }
 
 /** Test hook: after start-up settles, record whether a window was opened, then quit. */
@@ -208,7 +225,7 @@ function trayChanged() {
 function renderTray() {
   if (!trayRenderer || quitting) return;
   try {
-    trayRenderer.render(trayView(hosts.snapshot(), { autostart: isAutostartEnabled(), version: appVersion }));
+    trayRenderer.render(trayView(hosts.snapshot(), { autostart: isAutostartEnabled(), version: appVersion, configFailure: store?.failure ?? null }));
   } catch (err) {
     report(err);
   }
@@ -307,8 +324,29 @@ app.on('window-all-closed', () => {});
 app.on('before-quit', () => { quitting = true; });
 
 function registerIpc() {
-  const save = (cfg) => saveConfig(paths().config, cfg);
-  ipcMain.handle('state', () => hosts.snapshot());
+  // Every write goes through the store, which refuses while config.json is unreadable (BBR-36).
+  const save = (cfg) => store.save(cfg);
+  ipcMain.handle('state', () => appState());
+  // Read config.json again (the user fixed it): apply what was read, never the blank host over it.
+  ipcMain.handle('reloadConfig', async () => {
+    await hosts.queue;
+    const config = openConfig();
+    if (!store.failure) {
+      await hosts.apply(config);
+      logger.info('config', `${store.path} read again`);
+    }
+    trayChanged();
+    return appState();
+  });
+  // The user chose to replace an unreadable config.json; the store copies it aside first, or refuses.
+  ipcMain.handle('startOver', async () => {
+    await hosts.queue;
+    const clean = store.startOver();
+    logger.info('config', `started over: ${store.path} now holds one empty host`);
+    await hosts.apply(clean);
+    trayChanged();
+    return appState();
+  });
   ipcMain.handle('log', () => logger.ring);
   ipcMain.handle('version', () => appVersion);
   ipcMain.handle('about', () => ({ ...aboutInfo({ version: appVersion }), icon: `data:image/png;base64,${iconPng('ready', 96).toString('base64')}` }));

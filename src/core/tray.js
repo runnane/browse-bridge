@@ -27,9 +27,10 @@ export function hostStateText(snap) {
  *   dev005: Tunnel down
  *   0.1.0+3 1b86d65
  */
-export function trayTooltip(agg, { version = '' } = {}) {
+export function trayTooltip(agg, { version = '', configFailure = null } = {}) {
   return [
     `browse-bridge — ${agg.label}`,
+    ...(configFailure ? [configFailureLine(configFailure)] : []),
     ...agg.hosts.map((h) => `${hostTitle(h)}: ${hostStateText(h)}`),
     ...(version ? [version] : []),
   ].join('\n');
@@ -46,9 +47,11 @@ export function trayTooltip(agg, { version = '' } = {}) {
  * retry, and the menu would be rebuilt (under the cursor) each time. The
  * window shows traffic.
  */
-export function trayMenuModel(agg, { autostart = false, version = '' } = {}) {
+export function trayMenuModel(agg, { autostart = false, version = '', configFailure = null } = {}) {
   return [
     { label: `browse-bridge: ${agg.label}`, enabled: false },
+    // The config file did not load (BBR-36): the window has the details and the Reload / Start over choice.
+    ...(configFailure ? [{ label: configFailureLine(configFailure), action: 'showWindow' }] : []),
     { type: 'separator' },
     ...agg.hosts.map(hostSubmenu),
     { type: 'separator' },
@@ -87,9 +90,22 @@ function hostSubmenu(h) {
   };
 }
 
-/** Everything the tray displays for one aggregate snapshot (HostManager.snapshot()). */
-export function trayView(agg, { autostart = false, version = '' } = {}) {
-  return { icon: agg.overall, tooltip: trayTooltip(agg, { version }), menu: trayMenuModel(agg, { autostart, version }) };
+/**
+ * One line naming the unreadable config file and why (ConfigStore's
+ * `failure`), cut to a length a menu shows: "⚠ Cannot read /…/config.json: Unexpected token …".
+ */
+export function configFailureLine(failure, max = 120) {
+  const line = `⚠ Cannot read ${failure.path}: ${String(failure.message).replace(/\s+/g, ' ')}`;
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+/** Everything the tray displays for one aggregate snapshot (HostManager.snapshot()), plus ConfigStore's failure if any. */
+export function trayView(agg, { autostart = false, version = '', configFailure = null } = {}) {
+  return {
+    icon: agg.overall,
+    tooltip: trayTooltip(agg, { version, configFailure }),
+    menu: trayMenuModel(agg, { autostart, version, configFailure }),
+  };
 }
 
 /**

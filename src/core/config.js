@@ -297,3 +297,107 @@ export function saveConfig(path, cfg) {
   renameSync(tmp, path);
   return clean;
 }
+
+/** Where an unreadable config file is copied aside: "<path>.broken-2026-11-21T16-38-17-752Z" (no colons). */
+export function brokenBackupPath(path, now = new Date()) {
+  return `${path}.broken-${now.toISOString().replace(/[:.]/g, '-')}`;
+}
+
+/** The start of the message a save is refused with while the config file is unreadable. */
+export const UNREADABLE_REFUSAL = 'could not be read, so nothing is saved over it';
+
+/**
+ * The one path the app reads and writes config.json through (BBR-36).
+ *
+ * A file that exists but does not load — bad JSON, a value normalizeAppConfig
+ * refuses, a permission error — is never replaced behind the user's back:
+ * open() copies its bytes aside to brokenBackupPath() before returning, and
+ * the store stays failed. While failed, `failure` says why and save() refuses
+ * every write, so an Apply on the blank host the app runs with cannot
+ * overwrite the user's hosts. It leaves the failed state only through open()
+ * reading the file again (after the user fixed it: the caller applies what was
+ * read, never the blank host), or startOver(), the user's explicit choice,
+ * which writes a fresh config only once a copy of the old bytes exists.
+ * A missing file is not a failure: it is the first start.
+ */
+export class ConfigStore {
+  constructor(path, { now = () => new Date() } = {}) {
+    this.path = path;
+    this.now = now;
+    /** null, or { path, message, backup, backupError } while the file could not be read. */
+    this.failure = null;
+  }
+
+  /**
+   * Read the file. Returns the app config: the file's, or one blank host when
+   * it is missing or unreadable (then `failure` is set and the bytes are copied aside).
+   */
+  open() {
+    try {
+      const config = loadConfig(this.path);
+      this.failure = null;
+      return config;
+    } catch (err) {
+      const prev = this.failure;
+      this.failure = { path: this.path, message: err.message, backup: null, backupError: null };
+      Object.assign(this.failure, this.backUp(prev?.backup));
+      return normalizeAppConfig({});
+    }
+  }
+
+  /**
+   * Copy the file's current bytes aside, never over an existing file. `known`
+   * is a backup already made: when it holds the same bytes it is reused, so a
+   * repeated Reload of one bad file leaves one copy. Returns { backup, backupError }.
+   */
+  backUp(known = null) {
+    let bytes;
+    try {
+      bytes = readFileSync(this.path);
+    } catch (err) {
+      return { backup: null, backupError: err.code === 'ENOENT' ? null : err.message };
+    }
+    if (known) {
+      try {
+        if (readFileSync(known).equals(bytes)) return { backup: known, backupError: null };
+      } catch {
+        // gone or unreadable: make a new one
+      }
+    }
+    const base = brokenBackupPath(this.path, this.now());
+    for (let n = 1; n <= 100; n++) {
+      const target = n === 1 ? base : `${base}-${n}`;
+      try {
+        writeFileSync(target, bytes, { flag: 'wx' });
+        return { backup: target, backupError: null };
+      } catch (err) {
+        if (err.code !== 'EEXIST') return { backup: null, backupError: err.message };
+      }
+    }
+    return { backup: null, backupError: 'no free backup file name' };
+  }
+
+  /** saveConfig through the guard: refused while the file is unreadable. */
+  save(cfg) {
+    if (this.failure) {
+      // The load error is not repeated here: it can quote file text, and the window's bar already shows it.
+      throw new Error(`${this.path} ${UNREADABLE_REFUSAL}. Fix the file and choose Reload, or choose Start Over.`);
+    }
+    return saveConfig(this.path, cfg);
+  }
+
+  /**
+   * The user chose to discard the unreadable file: copy its current bytes
+   * aside (again, if they changed since open()), then write a config with one
+   * blank host. Refused when the copy cannot be made. Returns the new config.
+   */
+  startOver() {
+    if (!this.failure) throw new Error(`${this.path} reads fine; there is nothing to start over from`);
+    const copy = this.backUp(this.failure.backup);
+    Object.assign(this.failure, copy);
+    if (copy.backupError) throw new Error(`Cannot start over: ${this.path} could not be copied aside first (${copy.backupError})`);
+    const clean = saveConfig(this.path, {});
+    this.failure = null;
+    return clean;
+  }
+}
