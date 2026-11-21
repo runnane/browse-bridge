@@ -34,6 +34,21 @@ The gates need only node, so a fresh worktree is enough (`worktreeSafe: true`).
 `node --test` runs files **in parallel**, so the two files' ports must never
 overlap. That happened once and made both tests fail on each other's relay.
 
+## The ssh guard (BBR-60)
+
+`npm test` and `npm run gates` set `BB_FORBID_SSH=1`. With it, `assertSshAllowed`
+in `src/core/exec.js` refuses (throws, prints `BB_FORBID_SSH: refusing to run ssh
+to "<dest>"`, and sets `process.exitCode = 1` so a caller that swallows the throw
+still fails its file) any `ssh`/`scp`/`sftp` whose destination, the argument
+after `--`, is not loopback (`127.x.y.z`, `localhost`, `::1`). It covers `run()`
+(so every transport call) and the tunnel's default spawner. The two private-sshd
+tests pass because they connect to 127.0.0.1, not because they are listed. Unset,
+nothing changes (`test/sshguard.test.js` pins both directions).
+
+If a test trips it, stub the transport (see how `test/hosts.test.js` stubs
+`pollNow`); do not exempt the test. A bare `node --test file` run does not set
+the variable: prefix it with `BB_FORBID_SSH=1`.
+
 If a run is killed, find leftovers by **port** (`ss -ltnp | grep ':399'`) and
 signal that pid. Never kill by name. A leaked ssh ControlMaster shows up as
 `ssh: …/bb-ssh-*/cm/cm-* [mux]`.
