@@ -56,7 +56,6 @@ export function pickSelected(hosts, selectedId) {
   return hosts[0]?.id ?? null;
 }
 
-/** The snapshot of one host from a HostManager snapshot ({ hosts: [...] }). */
 /** Shared with core (tray, controller) so a message and the control it names cannot drift; see core/labels.js. */
 export { SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME } from '../core/labels.js';
 
@@ -68,6 +67,7 @@ export function pairingAddressOf(cfg) {
   return `${cfg.localAddress === '127.0.0.1' ? 'localhost' : cfg.localAddress}:${cfg.localPort}`;
 }
 
+/** The snapshot of one host from a HostManager snapshot ({ hosts: [...] }). */
 export function hostById(state, id) {
   return state?.hosts?.find((h) => h.id === id) ?? null;
 }
