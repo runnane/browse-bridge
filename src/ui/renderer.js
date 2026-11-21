@@ -1,6 +1,6 @@
 /* global bridge */
 import {
-  AGGREGATE_CLASS, AGGREGATE_GLYPH, GLYPH, actionsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, fmtRate,
+  AGGREGATE_CLASS, AGGREGATE_GLYPH, GLYPH, actionsView, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, fmtRate,
   RELAY_LABEL, hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseHostForm, pickSelected, withHostSnapshot,
 } from './viewmodel.js';
 
@@ -201,6 +201,8 @@ function render() {
     ? `${yesNo(st.extensionConnected, 'connected', 'not connected')}${st.browsers != null ? ` · ${st.browsers} paired` : ''} · pairs with ${s.pairingAddress}`
     : `unknown · pairs with ${s.pairingAddress}`;
   $('tabs').textContent = st ? `${st.tabs ?? 'unknown'} open · ${st.activeTargets ?? 'unknown'} attached` : 'unknown';
+  const agents = agentsView(st?.agents);
+  $('agents').textContent = agents.hint ? `${agents.text} — ${agents.hint}` : agents.text;
   $('autoupdate').textContent = st?.autoUpdate ?? 'unknown';
   const next = st?.nextStep && st.extensionConnected !== true && s.connected ? st.nextStep : '';
   $('nextStep').hidden = !next;
