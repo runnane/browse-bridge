@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import { isStableVersion } from './browseversion.js';
 
 /** The browse version this app installs and expects on the remote host. */
-export const PINNED_BROWSE_VERSION = '0.1.4';
+export const PINNED_BROWSE_VERSION = '0.1.5';
 
 /**
  * browse versions this release of the app has been measured against (BBR-41):
@@ -11,14 +11,14 @@ export const PINNED_BROWSE_VERSION = '0.1.4';
  * version outside this list is offered as "not yet tested with this app".
  * The pin is always one of them; a test holds that.
  */
-export const TESTED_BROWSE_VERSIONS = Object.freeze(['0.1.4']);
+export const TESTED_BROWSE_VERSIONS = Object.freeze(['0.1.4', '0.1.5']);
 
 /**
  * Pins earlier releases of this app wrote into config.json as the default.
  * A stored value equal to one of these was never a user choice, so it is
  * dropped on load and the current pin applies.
  */
-const SUPERSEDED_DEFAULT_PINS = ['0.1.3'];
+const SUPERSEDED_DEFAULT_PINS = ['0.1.3', '0.1.4'];
 
 export const DEFAULTS = Object.freeze({
   /** ssh destination, e.g. "jon@dev004" or an alias from ~/.ssh/config. */

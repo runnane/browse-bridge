@@ -1,5 +1,5 @@
 /**
- * Everything the app knows about the browse CLI (measured against 0.1.3 and 0.1.4):
+ * Everything the app knows about the browse CLI (measured against 0.1.3, 0.1.4 and 0.1.5):
  * `status --json`, `pair --wait-seconds N`, `update --mode off`,
  * `set hostname 127.0.0.1`, `restart`, `version`.
  */
