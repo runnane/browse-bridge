@@ -6,9 +6,9 @@
   "gates": {
     "all": "npm run gates"
   },
-  "release": "none",
-  "ci": "none",
-  "liveBoundary": "shell",
+  "release": "release-it",
+  "ci": "github-hosted",
+  "liveBoundary": "registry-publish",
   "worktreeSafe": true,
   "deepDives": ".agents/",
   "gatesDoc": ".agents/gates.md",

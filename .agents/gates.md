@@ -1,7 +1,7 @@
 # Gates
 
 ```bash
-npm run gates                                   # syntax check + node --test test/
+npm run gates                                   # syntax check + node --test test/*.test.js
 BROWSE_BIN=/path/to/browse npm run gates        # + the two integration tests
 ```
 
@@ -158,6 +158,19 @@ signal that pid. Never kill by name. A leaked ssh ControlMaster shows up as
 - **The real dev004 tunnel and real Edge pairing.** Neither is reachable from
   the dev box. The owner verifies those.
 
-## No CI
+## CI
 
-`ci: none`: a local green run is the only evidence, and must be said to be.
+`ci: github-hosted`. Two workflows in `.github/workflows/`:
+
+- **`gates.yml`** runs `npm run gates` on every PR and on every push to
+  `main`, with `BROWSE_BIN` set to the pinned browse, so **nothing skips**. Its
+  `gates` check is the one the merge waits for. It is the only place the two
+  browse integration tests are guaranteed to run, because the local download
+  of browse is classifier-refused in some sessions (table above). A local run
+  without `BROWSE_BIN` is still worth doing first, and must say that two tests
+  skipped.
+- **`release.yml`** runs the gates again, builds the AppImage and smokes it
+  headlessly. On a PR it is a **dry run**, triggered only when the PR touches
+  the workflow files, `scripts/`, `package.json` or the lockfile; it never
+  publishes. On a pushed `v*` tag it publishes to GitHub Releases. A tag is
+  never pushed as part of an issue's PR (AGENTS.md).

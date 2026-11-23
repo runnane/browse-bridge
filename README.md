@@ -117,8 +117,29 @@ the link (which browse itself does not encrypt) rides inside SSH.
 
 ## Install (on the machine with the browser)
 
-Requires Node ≥ 22 (npm or pnpm both work), and key-based ssh to the remote host (the app never
-prompts for a password — load your key into the agent or set `IdentityFile`).
+Requires key-based ssh to the remote host (the app never prompts for a password
+— load your key into the agent or set `IdentityFile`).
+
+### The AppImage
+
+Download `browse-bridge-x86_64.AppImage` and `SHA256SUMS` from the latest
+[GitHub release](https://github.com/runnane/browse-bridge/releases/latest),
+check the file, and run it:
+
+```bash
+sha256sum -c SHA256SUMS --ignore-missing
+chmod +x browse-bridge-x86_64.AppImage
+./browse-bridge-x86_64.AppImage
+```
+
+It needs FUSE 3's `fusermount3` (or run it with `APPIMAGE_EXTRACT_AND_RUN=1`),
+and no Node. To add it to the application menu, tick **Show in application
+menu** on the General page. Keep the file where it is: autostart and the menu
+entry name its path. It updates itself (see Updating).
+
+### From a source checkout (development)
+
+Requires Node ≥ 22 (npm or pnpm both work).
 
 ```bash
 git clone git@github.com:runnane/browse-bridge.git ~/dev/browse-bridge
