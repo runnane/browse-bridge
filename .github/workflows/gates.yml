@@ -8,6 +8,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Called by release.yml (BBR-72), so a release runs exactly these gates.
+  workflow_call:
 
 permissions:
   contents: read
