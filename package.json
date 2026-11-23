@@ -55,5 +55,8 @@
       "repo": "browse-bridge",
       "releaseType": "release"
     }
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
   }
 }

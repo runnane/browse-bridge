@@ -137,7 +137,21 @@ fetches it on first launch (one-off, ~100 MB).
 
 ### Updating
 
-With **Check for updates** on (General; the default), the app fetches the
+One setting, **Check for updates** (General; on by default), governs both
+install kinds.
+
+**The AppImage** checks GitHub Releases at start-up and once a day. A newer
+release shows as **Update available: browse-bridge X.Y.Z** in the status bar,
+the tray and About, and is downloaded in the background. It is installed when
+browse-bridge quits, over the same file, so autostart and the menu entry keep
+working (keep the file's name free of a version number: electron-updater
+writes a versioned name under the new version instead). The app never restarts by itself, because a restart drops every
+tunnel. To install at once, click **Update and Restart** in About: every host
+is stopped cleanly, the update installs, and the app starts again. With
+**Check for updates** off, nothing is checked or downloaded, and an update
+already downloaded is not installed on quit.
+
+**A source checkout**: with **Check for updates** on, the app fetches the
 checkout's default branch at start-up and once a day, with no prompt (ssh
 `BatchMode=yes`), and shows **Update available: N commits** in the status bar,
 the tray and About. Nothing is installed until you click

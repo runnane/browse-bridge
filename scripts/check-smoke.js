@@ -8,6 +8,7 @@
 //   node scripts/check-smoke.js <prefix>.json <version>
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { UPDATER_LOAD_FAILED } from '../src/core/appupdate.js';
 
 /** @returns {{ok: boolean, problems: string[]}} */
 export function checkSmoke(smoke, version) {
@@ -18,6 +19,8 @@ export function checkSmoke(smoke, version) {
   const about = smoke.dialogs?.about;
   if (typeof about !== 'string' || about === '') problems.push('dialogs.about is missing');
   else if (!about.includes(version)) problems.push(`dialogs.about does not show version ${version}`);
+  // BBR-73: the packaged build loads electron-updater at start-up; About says so when it could not.
+  if (typeof about === 'string' && about.includes(UPDATER_LOAD_FAILED)) problems.push(`dialogs.about says ${UPDATER_LOAD_FAILED}`);
   return { ok: problems.length === 0, problems };
 }
 
