@@ -133,16 +133,28 @@ signal that pid. Never kill by name. A leaked ssh ControlMaster shows up as
   the orchestrator against a `git worktree add --detach` of `origin/main` with
   `node_modules` symlinked from the primary checkout. Never drop the
   `XDG_CONFIG_HOME`/`HOME` override to get past the guard.
-- **A throwaway `HOME` alone is the same isolation, and the guard allows it.**
-  Measured 2026-11-19 (BBR-32): with `XDG_CONFIG_HOME` **unset** in the
-  session (check: `echo "${XDG_CONFIG_HOME-unset}"`), Electron puts the config
-  under `$HOME/.config`. So write `<tmp>/home/.config/browse-bridge/config.json`
-  and run with only `HOME=<tmp>/home`, from inside the isolated worktree
-  (`node_modules` symlinked in, and removed before committing: the
-  `node_modules/` ignore rule matches a directory, not a symlink). It is valid
-  only when the app log's `started; config <path>` line names that file, so
-  read that line every time. If `XDG_CONFIG_HOME` is set, this route is
-  closed.
+- **A throwaway `HOME` alone is refused inside an isolated session too.**
+  On 2026-11-19 (BBR-32) the guard allowed it. On 2026-11-23 (BBR-70) a
+  worktree-isolated subagent sent `HOME=<tmp>/home BB_SMOKE_OUT=… timeout 90 …`
+  with `XDG_CONFIG_HOME` unset, and it was refused: "sets HOME, injecting git
+  configuration whose effect on where git writes can't be verified". So
+  **every smoke render is run by a session that is not worktree-isolated**
+  (the orchestrator), pointed at the isolated worktree's path. With
+  `XDG_CONFIG_HOME` unset (`echo "${XDG_CONFIG_HOME-unset}"`), Electron reads
+  `$HOME/.config`, so write `<tmp>/home/.config/browse-bridge/config.json` and
+  run with only `HOME=<tmp>/home`. The run is valid only when the app log
+  (`<tmp>/home/.config/browse-bridge/logs/app.log`) reads `started <version>;
+  config <that file>`, so read that line every time.
+- **The AppImage render** (BBR-70). After `pnpm run dist`, run
+  `dist/browse-bridge-x86_64.AppImage --ozone-platform=headless` directly,
+  with the same `HOME`, `BB_SMOKE_OUT` and `timeout 90`. It is built on the
+  static AppImage runtime, so it needs no libfuse2. Check
+  `dialogs.about` shows the bare `package.json` version (a packaged build makes
+  no git call). To prove the startup refresh, first plant stale
+  `<tmp>/home/.config/autostart/browse-bridge.desktop` and
+  `<tmp>/home/.local/share/applications/browse-bridge.desktop` with
+  `Exec=/tmp/.mount_stale/…`. After the run, both `Exec=` lines must name the
+  AppImage, and only the autostart one has `--hidden`.
 - **The real dev004 tunnel and real Edge pairing.** Neither is reachable from
   the dev box. The owner verifies those.
 
