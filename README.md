@@ -34,7 +34,7 @@ the link (which browse itself does not encrypt) rides inside SSH.
 - **Tunnel, kept up:** `ssh -N -L` with `BatchMode`, `ExitOnForwardFailure`,
   keepalives, and reconnect with backoff (1 s → 30 s). Follows the relay if it
   moves port.
-- **Set Up Host:** one button installs browse **pinned** (0.1.4) into
+- **Set Up Host:** one button installs browse **pinned** (0.1.5) into
   `~/.local` on the remote (no sudo). On Linux (x64 or arm64, glibc or musl)
   it downloads the native binary's tarball from the npm registry with `curl`
   and checks its SHA-512 against the registry's integrity, so the remote
@@ -93,7 +93,7 @@ the link (which browse itself does not encrypt) rides inside SSH.
   tool calls go to the relay on the remote host and never cross this tunnel,
   and one tool call (a click, say) is usually several commands. Pairing and
   keep-alive pings are not counted. If a connection cannot be read (a browse
-  version other than 0.1.4 that compresses or changes its frames, say), the
+  version other than 0.1.5 that compresses or changes its frames, say), the
   tab says so rather than showing zero.
 - **Logs:** live in the window, in `~/.config/browse-bridge/logs/app.log`
   (rotated at 1 MB), plus the remote relay log on demand. Each line is tagged
@@ -220,7 +220,7 @@ App-wide (the **General** page, below the host list):
 
 | key | default | in the window | meaning |
 | --- | --- | --- | --- |
-| `browseVersion` | 0.1.4 | General, read-only | pinned version setup installs and checks on every host without its own |
+| `browseVersion` | 0.1.5 | General, read-only | pinned version setup installs and checks on every host without its own |
 | `pollSeconds` | 10 | General | status poll interval in seconds (2 to 3600 in the window); a change reconnects no host |
 | `checkUpdates` | true | General | check daily whether origin has a newer browse-bridge (see Updating) and whether the npm registry has a newer browse; saves on tick, reconnects no host |
 
@@ -290,7 +290,7 @@ on the next Save.
 
 ### Which browse versions work together
 
-The pin today is browse **0.1.4**: Set Up Host installs it on each remote
+The pin today is browse **0.1.5**: Set Up Host installs it on each remote
 host, turns browse's auto-update off, and warns when a host runs anything
 else. The browser extension is not pinned: the Chrome Web Store always serves
 the newest **stable** release (development builds never reach the store). So
@@ -323,9 +323,9 @@ CURRENT, move the pin before that extension reaches the store; otherwise the
 extension is refused and tells the user to update browse. A pin bump is itself
 gated on the integration tests against the real binary (`BROWSE_BIN`, below).
 
-**"browse 0.1.4 is out of date" in the extension.** With auto-update off, the
+**"browse 0.1.5 is out of date" in the extension.** With auto-update off, the
 relay still checks for releases and tells the extension about newer ones, so
-the extension's settings page shows *"browse 0.1.4 is out of date (… is out).
+the extension's settings page shows *"browse 0.1.5 is out of date (… is out).
 Run …"* with an update command (for an npm install, `npm install -g
 @opencode/browse@latest`). **Ignore it.** Running that command on a host
 replaces the pinned version with whatever is newest, which is exactly what the

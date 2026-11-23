@@ -3,7 +3,7 @@
 Electron tray app; see README.md for what it does. Tracker project **BBR** (`browse-bridge`); per-repo facts are in [`.agents/repo.json`](.agents/repo.json), gate traps in [`.agents/gates.md`](.agents/gates.md).
 
 - **Logic lives in `src/core/` as plain Node modules**; `src/main.js` is a thin Electron shell. Keep it that way — everything in `core/` is tested without a display.
-- **Gates:** the command in `gates.all` of [`.agents/repo.json`](.agents/repo.json) — do not copy it here. Run it with `BROWSE_BIN=<path to a browse 0.1.4 binary>` so the integration test is not skipped, and say so if it was.
+- **Gates:** the command in `gates.all` of [`.agents/repo.json`](.agents/repo.json) — do not copy it here. Run it with `BROWSE_BIN=<path to a browse 0.1.5 binary>` so the integration test is not skipped, and say so if it was.
 - **The integration test and the headless smoke run start a real browse relay.** They stop it by the pid browse reports; if a run is killed, find the relay by its port (`ss -ltnp`) and signal that pid — never by name.
 - **The tray cannot be tested headlessly** (GTK needs a display). `BB_SMOKE_OUT` renders the window only.
 - **Never put a pairing code in a log** — `Logger` redacts `XXXX-XXXX`; a test pins it.

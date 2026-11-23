@@ -45,7 +45,11 @@ test('config: an older default pin stored by a previous release is dropped; a de
   assert.equal(loadConfig(path).browseVersion, DEFAULTS.browseVersion);
   writeFileSync(path, JSON.stringify({ browseVersion: '0.1.3', hosts: [{ id: 'a', host: 'dev004' }] }));
   assert.equal(loadConfig(path).browseVersion, DEFAULTS.browseVersion, 'also in the host-list shape');
-  assert.equal(DEFAULTS.browseVersion, '0.1.4');
+  assert.equal(DEFAULTS.browseVersion, '0.1.5');
+  writeFileSync(path, JSON.stringify({ host: 'dev004', browseVersion: '0.1.4' }));
+  assert.equal(loadConfig(path).browseVersion, '0.1.5', '0.1.4 was the previous default pin and moves with the pin');
+  writeFileSync(path, JSON.stringify({ browseVersion: '0.1.4', hosts: [{ id: 'a', host: 'dev004' }] }));
+  assert.equal(loadConfig(path).browseVersion, '0.1.5', '0.1.4 moves in the host-list shape too');
   writeFileSync(path, JSON.stringify({ host: 'dev004', browseVersion: '0.1.2' }));
   assert.equal(loadConfig(path).browseVersion, '0.1.2');
 });
