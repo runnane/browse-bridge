@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { checkReleaseTag } from '../scripts/check-release-tag.js';
+import { checkReleaseTag, checkTagOnMain } from '../scripts/check-release-tag.js';
 import { checkSmoke } from '../scripts/check-smoke.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -22,6 +22,32 @@ test('tag guard: a different version, a missing v, a double v and an empty tag a
   assert.equal(checkReleaseTag('', '1.2.3').ok, false);
   assert.equal(checkReleaseTag(undefined, '1.2.3').ok, false);
   assert.equal(checkReleaseTag('v1.2.3', '').ok, false);
+});
+
+test('tag on main: a tag push whose commit is not on main fails', () => {
+  const r = checkTagOnMain({ isTagPush: true, isAncestor: () => false });
+  assert.equal(r.ok, false);
+  assert.equal(r.skipped, false);
+  assert.match(r.message, /not an ancestor of origin\/main/);
+});
+
+test('tag on main: a tag push whose commit is on main passes', () => {
+  const r = checkTagOnMain({ isTagPush: true, isAncestor: () => true });
+  assert.equal(r.ok, true);
+  assert.equal(r.skipped, false);
+});
+
+test('tag on main: not a tag push (a PR dry run) skips the check and never asks for ancestry', () => {
+  let asked = false;
+  const r = checkTagOnMain({ isTagPush: false, isAncestor: () => { asked = true; return false; } });
+  assert.equal(r.ok, true);
+  assert.equal(r.skipped, true);
+  assert.equal(asked, false);
+});
+
+test('release workflow: the guard job checks out full history for the ancestry check', () => {
+  const guard = release.slice(release.indexOf('  guard:'), release.indexOf('  gates:'));
+  assert.match(guard, /fetch-depth: 0/);
 });
 
 test('tag guard CLI: exits 0 for this package.json version and 1 for another', () => {
