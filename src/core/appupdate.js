@@ -124,6 +124,8 @@ export class PackagedUpdates {
     this.result = null;
     this.outcome = null;
     this.timer = null;
+    /** Where electron-updater wrote the new file, when it was not over the running one (BBR-83). */
+    this.installedPath = null;
 
     // Notify first: the download is started here, only while the setting is on.
     updater.autoDownload = false;
@@ -143,6 +145,7 @@ export class PackagedUpdates {
     // Only when the running file's name carries a version: electron-updater then writes the new file under the new name.
     updater.on('appimage-filename-updated', (path) => {
       this.logger.warn(LOG_SOURCE, `the update was installed as ${path}, not over the running file`);
+      this.installedPath = path;
       this.onPathChanged(path);
     });
 
@@ -254,11 +257,20 @@ export class PackagedUpdates {
 
   /**
    * The user's click on Update and Restart: the update must be downloaded and
-   * the setting on. Ask for a relaunch, then run the app's clean quit(),
-   * which stops every host; electron-updater installs on that quit. Never
-   * quitAndInstall, which would quit without stopping the hosts first.
+   * the setting on. Run the app's clean quit(), which stops every host;
+   * electron-updater installs on that quit. Never quitAndInstall, which would
+   * quit without stopping the hosts first.
+   *
+   * The relaunch is registered from the app's 'quit' event (`onQuit`), not
+   * before the quit (BBR-83): electron-updater installs inside its own 'quit'
+   * handler, registered at download time and so ahead of this one, and when
+   * the running file's name carries a version that install writes the new file
+   * under a new name and emits appimage-filename-updated. Registered after it,
+   * `relaunch(path)` gets that new path (undefined: the file kept its name).
+   * Electron's app.relaunch only registers; the new process starts once this
+   * one has exited, so registering inside 'quit' is in time.
    */
-  async installNow({ relaunch, quit }) {
+  async installNow({ relaunch, quit, onQuit }) {
     if (this.updating) throw new Error('An update is already being installed.');
     if (this.smoke) throw new Error('The headless test hooks do not install updates.');
     if (!this.enabled) throw new Error('Checking for updates is off, so no update is installed.');
@@ -268,7 +280,8 @@ export class PackagedUpdates {
     this.updater.autoInstallOnAppQuit = true;
     this.logger.info(LOG_SOURCE, `installing browse-bridge ${this.result.version}: every host stops, then it installs and restarts`);
     this.onChange();
-    relaunch();
+    this.installedPath = null;
+    onQuit(() => relaunch(this.installedPath ?? undefined));
     await quit();
   }
 

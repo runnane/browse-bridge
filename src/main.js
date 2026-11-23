@@ -348,7 +348,12 @@ async function runUpdateCheck() {
 async function runUpdate() {
   // A packaged build: the update is already downloaded; every host stops in quit(), it installs on that quit, then relaunches.
   if (appUpdates) {
-    await appUpdates.installNow({ relaunch: () => app.relaunch({ execPath: menuArgv()[0], args: [] }), quit });
+    // The relaunch is registered from the 'quit' event, after electron-updater's install handler (BBR-83): a renamed install changes the path.
+    await appUpdates.installNow({
+      relaunch: (installedPath) => app.relaunch({ execPath: installedPath ?? menuArgv()[0], args: [] }),
+      onQuit: (fn) => app.once('quit', () => fn()),
+      quit,
+    });
     return { ok: true };
   }
   if (updates.updating || updates.checking) throw new Error('An update check or an update is already running; try again in a moment.');
