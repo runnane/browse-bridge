@@ -24,9 +24,18 @@ classifier judges a compound call as a whole. A refusal is never routed
 around (a container copy-out, another tool, a rewording); the owner confirms
 the exact step instead.
 
+**The verdict differs from one session to the next**, so a `BROWSE_BIN` run is
+never guaranteed. The same plain step passed on one day and was refused the
+next. An owner's confirmation covers only the session it was given in. Plan
+for the gates to run without `BROWSE_BIN`, and say so whenever they do.
+
 | date | call | verdict |
 | --- | --- | --- |
-| 2026-11-22 | `npm pack @opencode/browse-linux-x64@0.1.5 2>&1 \| grep …` + unpack + run, with two unrelated commands appended | refused, *Undermining Oversight*. The plain 0.1.5 step is unmeasured; BBR-40 holds the owner's ask |
+| 2026-11-23 | the plain step for 0.1.4, alone (BBR-76) | refused, *Undermining Oversight* |
+| 2026-11-23 | the plain step for 0.1.5, alone (BBR-76) | refused, *Undermining Oversight* |
+| 2026-11-22 | the plain step for 0.1.5, alone, retried unaltered after the owner confirmed it in an attended session (BBR-40) | passed |
+| 2026-11-22 | the plain step for 0.1.5, alone, before confirmation (BBR-40) | refused, *Undermining Oversight* |
+| 2026-11-22 | `npm pack @opencode/browse-linux-x64@0.1.5 2>&1 \| grep …` + unpack + run, with two unrelated commands appended | refused, *Undermining Oversight* |
 | 2026-11-22 | the plain step for 0.1.4 (`mkdir`, `cd`, `npm pack`, `tar xzf`, `browse version`) | passed |
 | 2026-11-22 | `npm pack` of the arm64 and arm64-musl 0.1.4 tarballs, not run | passed |
 | 2026-11-22 | curl of the Chrome Web Store listing with a Google consent cookie | refused, *Unauthorized Access*. The store's version needs a real browser (BBR-51) |
