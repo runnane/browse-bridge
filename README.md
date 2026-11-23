@@ -339,7 +339,7 @@ throwaway `HOME` on ports 39988–39991, and stops the relay it started.
 ### Build an AppImage locally
 
 ```bash
-pnpm install       # or: npm install
+pnpm install
 pnpm run dist      # → dist/browse-bridge-x86_64.AppImage
 ```
 
@@ -349,8 +349,9 @@ application-menu entries the app writes (they name `$APPIMAGE`, not the
 transient `/tmp/.mount_*` path) keep working after the file is replaced.
 The AppImage keeps Chromium's sandbox where unprivileged user namespaces work,
 and starts with `--no-sandbox` where they do not (Ubuntu 24.04+ by default),
-the same policy as `bin/browse-bridge`. Without FUSE, run it with
-`APPIMAGE_EXTRACT_AND_RUN=1`.
+the same policy as `bin/browse-bridge`. It uses the static AppImage runtime,
+so it needs FUSE 3's `fusermount3` but not libfuse2 (absent from a default
+Ubuntu 24.04). Without FUSE at all, run it with `APPIMAGE_EXTRACT_AND_RUN=1`.
 
 ## Credits and affiliation
 

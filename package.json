@@ -23,6 +23,9 @@
   "build": {
     "appId": "io.github.runnane.browse-bridge",
     "productName": "browse-bridge",
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
     "directories": {
       "output": "dist"
     },
