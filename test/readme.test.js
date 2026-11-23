@@ -35,6 +35,14 @@ test('readme: the development commands use the gate the manifest names', () => {
   assert.ok(!/\bpnpm gates\b/.test(readme), 'README still says "pnpm gates"; this repo has no pnpm');
 });
 
+test('readme: the AppImage install checks the download against SHA256SUMS before running it (BBR-74)', () => {
+  const lines = readme.split('\n');
+  const check = lines.findIndex((l) => /^sha256sum -c SHA256SUMS\b/.test(l));
+  assert.ok(check >= 0, 'README Install has no "sha256sum -c SHA256SUMS" step');
+  const run = lines.findIndex((l) => l.startsWith('./browse-bridge-x86_64.AppImage'));
+  assert.ok(run > check, 'README must run the AppImage after the checksum step');
+});
+
 test('readme: the pin-check script the README tells you to run exists', () => {
   assert.ok(readme.includes('node scripts/check-browse-pin.js'));
   assert.doesNotThrow(() => readFileSync(new URL('../scripts/check-browse-pin.js', import.meta.url)));
