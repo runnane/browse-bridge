@@ -129,21 +129,52 @@ test('appupdate: a finished download never restarts the app; it installs on quit
   assert.ok(lines().includes('info browse-bridge 0.2.0 downloaded; it installs when browse-bridge quits'));
 });
 
-test('appupdate: Update and Restart relaunches, then runs the clean quit, and never calls quitAndInstall', async () => {
+/**
+ * A fake Electron app's 'quit' event with electron-updater's ordering: its
+ * install handler is registered at download time (before the click), the
+ * app's own relaunch handler at the click. `renameTo` makes the install behave
+ * like a version-carrying file name: it emits appimage-filename-updated.
+ */
+function fakeQuitting(updater, { renameTo = null } = {}) {
+  const app = new EventEmitter();
   const order = [];
+  app.once('quit', () => {
+    order.push('install');
+    if (renameTo) updater.emit('appimage-filename-updated', renameTo);
+  });
+  return {
+    order,
+    onQuit: (fn) => app.once('quit', () => { order.push('relaunch-registered'); fn(); }),
+    quit: async () => { order.push('quit'); app.emit('quit', {}, 0); },
+  };
+}
+
+test('appupdate: Update and Restart runs the clean quit, relaunches from the quit event, and never calls quitAndInstall', async () => {
   const { pu, updater } = make();
   pu.follow(true);
   await settle();
   updater.emit('update-downloaded', { version: '0.2.0' });
-  let installOnQuitAtQuit = null;
-  await pu.installNow({
-    relaunch: () => order.push('relaunch'),
-    quit: async () => { installOnQuitAtQuit = updater.autoInstallOnAppQuit; order.push('quit'); },
-  });
-  assert.deepEqual(order, ['relaunch', 'quit']);
-  assert.equal(installOnQuitAtQuit, true, 'the install rides on the clean quit');
+  const q = fakeQuitting(updater);
+  const targets = [];
+  await pu.installNow({ relaunch: (p) => targets.push(p), onQuit: q.onQuit, quit: q.quit });
+  assert.deepEqual(q.order, ['quit', 'install', 'relaunch-registered']);
+  assert.deepEqual(targets, [undefined], 'the file kept its name: the caller relaunches the running path');
+  assert.equal(updater.autoInstallOnAppQuit, true, 'the install rides on the clean quit');
   assert.equal(updater.calls.quitAndInstall, 0, 'quitAndInstall would quit without stopping the hosts');
   assert.equal(updateSummary(pu.view()).line, 'Updating browse-bridge…');
+});
+
+test('appupdate: a renamed install (appimage-filename-updated during the quit) is relaunched at the NEW path (BBR-83)', async () => {
+  const changed = [];
+  const { pu, updater } = make({ onPathChanged: (p) => changed.push(p) });
+  pu.follow(true);
+  await settle();
+  updater.emit('update-downloaded', { version: '0.2.0' });
+  const q = fakeQuitting(updater, { renameTo: '/home/u/Apps/browse-bridge-0.2.0.AppImage' });
+  const targets = [];
+  await pu.installNow({ relaunch: (p) => targets.push(p), onQuit: q.onQuit, quit: q.quit });
+  assert.deepEqual(changed, ['/home/u/Apps/browse-bridge-0.2.0.AppImage'], 'autostart and the menu entry follow too');
+  assert.deepEqual(targets, ['/home/u/Apps/browse-bridge-0.2.0.AppImage']);
 });
 
 test('appupdate: Update and Restart refuses before a download, and while off', async () => {
