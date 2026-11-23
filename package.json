@@ -11,9 +11,9 @@
   },
   "scripts": {
     "start": "electron .",
-    "test": "BB_FORBID_SSH=1 node --test test/",
+    "test": "BB_FORBID_SSH=1 node --test test/*.test.js",
     "check": "node scripts/check-syntax.js",
-    "gates": "node scripts/check-syntax.js && BB_FORBID_SSH=1 node --test test/",
+    "gates": "node scripts/check-syntax.js && BB_FORBID_SSH=1 node --test test/*.test.js",
     "dist": "electron-builder --linux AppImage --publish never"
   },
   "devDependencies": {
