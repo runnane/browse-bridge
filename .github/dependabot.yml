@@ -1,6 +1,5 @@
 # Weekly version updates for the npm dependencies (BBR-26).
 # Dependabot's npm ecosystem reads pnpm-lock.yaml as well as package.json.
-# No github-actions entry: the repo has no workflows (ci: none).
 version: 2
 updates:
   - package-ecosystem: npm
@@ -13,3 +12,11 @@ updates:
       # would not carry the chore(deps) prefix this repo uses.
       prefix: chore(deps)
       prefix-development: chore(deps)
+  # Keeps the SHA-pinned actions in .github/workflows current (BBR-71).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore(ci)
