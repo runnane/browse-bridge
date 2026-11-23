@@ -15,6 +15,7 @@ import { aboutInfo, linkUrl } from './core/about.js';
 import { readSshAliases } from './core/sshconfig.js';
 import { testConnection, expectedBrowseVersion } from './core/sshtest.js';
 import { UPDATE_CHECK_INTERVAL_MS, checkForUpdate, performUpdate, updateSummary } from './core/updater.js';
+import { E2E_QUIT_ENV, FEED_ENV, PackagedUpdates, UPDATER_LOAD_FAILED, loadAutoUpdater } from './core/appupdate.js';
 import { iconPng, trayIconPng } from './icons.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -54,6 +55,12 @@ const appDir = join(here, '..');
 /** The updater's state (BBR-43); core/updater.js's updateSummary turns it into what the window and tray show. */
 const updates = { enabled: true, checking: false, updating: false, result: null, outcome: null };
 let updateTimer = null;
+/** A packaged build's updater (BBR-73; the decisions are in core/appupdate.js); null in a source checkout. */
+let appUpdates = null;
+/** What updateSummary reads: the packaged updater's state, or the source checkout's. */
+const updateState = () => (appUpdates ? appUpdates.view() : updates);
+/** Test-only (BBR-73): a loopback feed plus a clean quit once downloaded, for the end-to-end run. Headless, like the smoke hooks. */
+const e2eUpdateRun = () => Boolean(app.isPackaged && process.env[FEED_ENV] && process.env[E2E_QUIT_ENV]);
 /** The newest stable browse on the npm registry (BBR-41); core/browseversion.js's browseUpstreamSummary turns it into what the window shows. */
 const browseUpstream = { enabled: true, checking: false, result: null };
 let browseTimer = null;
@@ -104,7 +111,7 @@ async function start() {
   if (process.env.BB_THEME === 'dark' || process.env.BB_THEME === 'light') nativeTheme.themeSource = process.env.BB_THEME;
 
   // The tray needs a desktop session (GTK display); the headless test hooks render the window only.
-  if (!process.env.BB_SMOKE_OUT && !process.env.BB_PROBE_WINDOW) {
+  if (!process.env.BB_SMOKE_OUT && !process.env.BB_PROBE_WINDOW && !e2eUpdateRun()) {
     tray = new Tray(trayIcon('stopped'));
     // On Linux (StatusNotifierItem) a left click is not reliably delivered, so every control is in the menu too.
     tray.on('click', () => showWindow());
@@ -139,6 +146,8 @@ async function start() {
   // A launch by hand shows the window; only the login autostart (--hidden) starts in the tray.
   // An unreadable config file always shows the window: it carries the error and the Reload / Start over choice.
   if (!startsHidden(process.argv) || hosts.snapshot().overall === 'none' || store.failure) showWindow();
+  // Only a packaged build loads electron-updater: a source run never reaches GitHub Releases.
+  if (app.isPackaged) await createAppUpdates();
   // Not awaited: a slow fetch must not hold start-up. Then every 24 h while the setting is on.
   scheduleUpdateChecks();
   // The newest browse on the npm registry (BBR-41): the same setting, the same cadence, not awaited either.
@@ -171,7 +180,7 @@ function appState() {
   const app = hosts.config
     ? { pollSeconds: hosts.config.pollSeconds, browseVersion: hosts.config.browseVersion, checkUpdates: hosts.config.checkUpdates, configPath: store.path }
     : null;
-  return { ...hosts.snapshot(), configFailure: store.failure, app, update: updateSummary(updates), browse: browseSummary() };
+  return { ...hosts.snapshot(), configFailure: store.failure, app, update: updateSummary(updateState()), browse: browseSummary() };
 }
 
 // ---------- the newest browse upstream (BBR-41; the decisions are in core/browseversion.js) ----------
@@ -235,19 +244,53 @@ async function changeBrowse(id, upgrade) {
   return res;
 }
 
+// ---------- updates for a packaged build (BBR-73; the decisions are in core/appupdate.js) ----------
+
+/**
+ * Load electron-updater and hand its autoUpdater to core/appupdate.js. Called
+ * only when packaged. A failure leaves the packaged build without updates,
+ * said so in About, and never falls back to the source updater.
+ */
+async function createAppUpdates() {
+  try {
+    const updater = await loadAutoUpdater();
+    logger.info('update', `electron-updater loaded (${updater.constructor?.name ?? 'unknown updater'})`);
+    appUpdates = new PackagedUpdates({
+      updater,
+      logger,
+      onChange: () => trayUpdate.run(),
+      onDownloaded: () => {
+        // Test-only (BBR-73 end-to-end run): quit cleanly, so the install-on-quit runs without a tray or a click.
+        if (!e2eUpdateRun()) return;
+        logger.warn('update', `${E2E_QUIT_ENV}: quitting cleanly so the downloaded update installs`);
+        setTimeout(() => quit(), 1000);
+      },
+      // electron-updater kept the running file's name unless it carried a version; if it did not, follow the new file.
+      onPathChanged: (path) => {
+        if (isAutostartEnabled()) setAutostart(true, autostartArgv([path]));
+        if (appMenuOffered() && isAppMenuEnabled()) setAppMenu(true, [path]);
+      },
+    });
+  } catch (err) {
+    logger.error('update', `could not load the updater: ${err.message}`);
+    updates.result = { status: 'unsupported', reason: UPDATER_LOAD_FAILED };
+  }
+}
+
 // ---------- updates for a source checkout (BBR-43; the decisions are in core/updater.js) ----------
 
 /**
  * Follow the Check for updates setting: check now and every 24 h when on;
- * when off, stop the timer and drop the notice. A packaged build is updated
- * by its package, and the headless test hooks never fetch: BB_SMOKE_UPDATE=N
- * shows N fake commits instead, so the smoke run can render the notice.
+ * when off, stop the timer and drop the notice. A packaged build hands the
+ * setting to core/appupdate.js. The headless test hooks never fetch:
+ * BB_SMOKE_UPDATE=N shows N fake commits instead (a version, x.y.z, for a
+ * packaged build), so the smoke run can render the notice.
  */
 function scheduleUpdateChecks() {
   clearInterval(updateTimer);
   updateTimer = null;
   if (app.isPackaged) {
-    updates.result = { status: 'unsupported', reason: 'this is a packaged build, updated by its package' };
+    appUpdates?.follow(hosts.config?.checkUpdates !== false);
   } else if (process.env.BB_SMOKE_OUT || process.env.BB_PROBE_WINDOW) {
     const n = Number(process.env.BB_SMOKE_UPDATE);
     updates.result = n > 0
@@ -276,6 +319,7 @@ function followUpdateSetting(before) {
 
 /** One check; a second one while a check or an update runs is dropped. Never throws. */
 async function runUpdateCheck() {
+  if (appUpdates) return appUpdates.check();
   if (!updates.enabled || updates.checking || updates.updating || app.isPackaged) return;
   updates.checking = true;
   trayUpdate.run();
@@ -302,8 +346,13 @@ async function runUpdateCheck() {
  * every host. A refusal is kept for the About dialog and nothing restarts.
  */
 async function runUpdate() {
+  // A packaged build: the update is already downloaded; every host stops in quit(), it installs on that quit, then relaunches.
+  if (appUpdates) {
+    await appUpdates.installNow({ relaunch: () => app.relaunch({ execPath: menuArgv()[0], args: [] }), quit });
+    return { ok: true };
+  }
   if (updates.updating || updates.checking) throw new Error('An update check or an update is already running; try again in a moment.');
-  if (app.isPackaged) throw new Error('A packaged build is updated by its package.');
+  if (app.isPackaged) throw new Error('This packaged build cannot update itself.');
   updates.updating = true;
   updates.outcome = null;
   trayUpdate.run();
@@ -442,7 +491,7 @@ function renderTray() {
   if (!trayRenderer || quitting) return;
   try {
     trayRenderer.render(trayView(hosts.snapshot(), {
-      autostart: isAutostartEnabled(), version: appVersion, configFailure: store?.failure ?? null, update: updateSummary(updates).line,
+      autostart: isAutostartEnabled(), version: appVersion, configFailure: store?.failure ?? null, update: updateSummary(updateState()).line,
     }));
   } catch (err) {
     report(err);
@@ -557,6 +606,7 @@ async function quit() {
   quitting = true;
   trayUpdate.cancel();
   clearInterval(updateTimer);
+  appUpdates?.stop();
   clearInterval(browseTimer);
   lagMonitor?.stop();
   await hosts?.stopAll();
@@ -632,11 +682,11 @@ function registerIpc() {
   // BBR-43: Check Now, and Update and Restart. Both answer with what the window shows (updater.js updateSummary).
   ipcMain.handle('checkForUpdates', async () => {
     await runUpdateCheck();
-    return updateSummary(updates);
+    return updateSummary(updateState());
   });
   ipcMain.handle('updateNow', async () => {
     await runUpdate();
-    return updateSummary(updates);
+    return updateSummary(updateState());
   });
   // BBR-41: check the npm registry for a newer browse now; Upgrade (to the version that check found) or Roll back
   // (to the pin) one host. The page names only the host, never a version.

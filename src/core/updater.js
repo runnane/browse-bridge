@@ -15,7 +15,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { run } from './exec.js';
-import { CHECK_UPDATES_LABEL } from './labels.js';
+import { CHECK_UPDATES_LABEL, UPDATE_LABEL } from './labels.js';
 
 /** The check runs at start-up and then this often. A convenience notice, so a timer is enough. */
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -73,8 +73,17 @@ const ok = (res) => res.code === 0 && !res.timedOut;
 export function failureReason(res) {
   if (res.timedOut) return 'it timed out';
   const line = res.stderr.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? `exit code ${res.code}`;
-  const clean = line.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>').replace(/\b[\w.-]+@[\w.-]+:\S+/g, '<remote>');
-  return clean.length > 160 ? `${clean.slice(0, 159)}…` : clean;
+  return scrubLine(line);
+}
+
+/**
+ * One line for the log with every URL and scp-style remote dropped, cut to
+ * `max` characters: the log ends up in Copy Diagnostics. Shared with the
+ * packaged updater (core/appupdate.js), whose messages name release URLs.
+ */
+export function scrubLine(line, max = 160) {
+  const clean = String(line).replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>').replace(/\b[\w.-]+@[\w.-]+:\S+/g, '<remote>');
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
 
 const BRANCH_NAME = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
@@ -240,26 +249,37 @@ export async function performUpdate(dir, {
  * never "up to date".
  */
 export function updateSummary(state) {
-  const { enabled = true, checking = false, updating = false, result = null, outcome = null } = state ?? {};
+  const { enabled = true, checking = false, downloading = false, updating = false, result = null, outcome = null } = state ?? {};
   const available = result?.status === 'available';
-  const line = available ? `Update available: ${result.behind} commit${result.behind === 1 ? '' : 's'}` : null;
-  const subjects = available ? result.subjects ?? [] : [];
+  // A packaged build's result (core/appupdate.js) names a release version, not commits on a branch.
+  const release = result?.kind === 'release';
+  const line = !available ? null
+    : release ? `Update available: browse-bridge ${result.version}`
+      : `Update available: ${result.behind} commit${result.behind === 1 ? '' : 's'}`;
+  const subjects = available && !release ? result.subjects ?? [] : [];
   let detail;
   if (updating) detail = 'Updating browse-bridge…';
   else if (result?.status === 'unsupported') detail = `Updates are not checked: ${result.reason}.`;
   else if (!enabled) detail = `Checking for updates is off (General → ${CHECK_UPDATES_LABEL}).`;
+  else if (downloading) detail = `Downloading browse-bridge ${result?.version ?? 'update'}…`;
   else if (checking) detail = 'Checking for updates…';
   else if (!result) detail = 'Not checked yet.';
   else if (result.status === 'failed') detail = `Could not check for updates: ${result.reason}.`;
-  else if (result.status === 'current') detail = `Up to date with origin/${result.branch}.`;
-  else detail = `${line} on origin/${result.branch}.${result.ahead ? ` This checkout also has ${result.ahead} commit${result.ahead === 1 ? '' : 's'} of its own, so it cannot fast-forward.` : ''}`;
+  else if (result.status === 'current') detail = release ? `Up to date: browse-bridge ${result.version} is the newest release.` : `Up to date with origin/${result.branch}.`;
+  else if (release) {
+    detail = result.downloaded
+      ? `browse-bridge ${result.version} is downloaded and installs when browse-bridge quits. ${UPDATE_LABEL} installs it now (every host is stopped first).`
+      : `browse-bridge ${result.version} is available; it downloads next and installs when browse-bridge quits.`;
+  } else detail = `${line} on origin/${result.branch}.${result.ahead ? ` This checkout also has ${result.ahead} commit${result.ahead === 1 ? '' : 's'} of its own, so it cannot fast-forward.` : ''}`;
   if (outcome && !updating) detail = `${outcome.message} ${detail}`;
-  const busy = checking || updating;
+  const busy = checking || downloading || updating;
+  // A release can be installed only once it is downloaded; a checkout fast-forwards on the click.
+  const installable = available && (!release || (result.downloaded === true && enabled));
   return {
     line: updating ? 'Updating browse-bridge…' : line,
     detail,
     subjects,
-    canUpdate: available && !busy,
+    canUpdate: installable && !busy,
     canCheck: enabled && !busy && result?.status !== 'unsupported',
     busy,
   };
