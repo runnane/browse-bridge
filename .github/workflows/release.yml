@@ -32,14 +32,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Full history: the tag guard asks whether the tagged commit is on origin/main.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
-      # The tag must be v + package.json's version. A dry run has no tag, so it
-      # checks the script against the version it would be released as.
+      # The tag must be v + package.json's version, and its commit must be an
+      # ancestor of origin/main (BBR-82; tag pushes only). A dry run has no tag,
+      # so it checks the script against the version it would be released as and
+      # skips the ancestry check.
       - name: Tag guard
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then

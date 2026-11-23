@@ -394,7 +394,8 @@ A release is a `v*` tag pushed to `main`. The tag push, and nothing else,
 builds the AppImage, smokes it headlessly, and publishes it to GitHub Releases
 with `latest-linux.yml` (the updater's feed) and `SHA256SUMS`
 (`.github/workflows/release.yml`). `main` takes no direct pushes, so the
-version bump is an ordinary PR and the tag comes after it merges:
+version bump is an ordinary PR and the tag comes after it merges. The workflow
+refuses a tag whose commit is not an ancestor of `origin/main`:
 
 1. On a topic branch cut from fresh `origin/main` (named for the release
    issue, e.g. `chore/bbr-99-release-0-2-0`), run `pnpm run release`.
