@@ -1,0 +1,52 @@
+# Runs the gates on every pull request and every push to main (BBR-71).
+# GitHub-hosted runner on purpose: the repo is public, and a self-hosted
+# runner would run fork PRs' code on our own hardware. No secrets, read-only
+# token, no path filters (a docs-only PR still needs a check).
+name: gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # sshd for test/ssh.test.js and test/sshtest-sshd.test.js, busybox for
+      # the ash runs. No npm install: the gates need nothing from node_modules.
+      - name: Install openssh-server and busybox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openssh-server busybox
+
+      # A test refuses bash as sh (.agents/gates.md).
+      - name: Assert /bin/sh is dash
+        run: |
+          target="$(readlink -f /bin/sh)"
+          echo "/bin/sh -> $target"
+          test "$(basename "$target")" = dash
+
+      - name: Fetch the pinned browse binary
+        run: |
+          version="$(node scripts/print-pinned-browse-version.js)"
+          echo "pinned browse version: $version"
+          mkdir -p "$RUNNER_TEMP/browse"
+          cd "$RUNNER_TEMP/browse"
+          npm pack "@opencode/browse-linux-x64@$version"
+          tar xzf ./*.tgz
+          ./package/bin/browse version
+          echo "BROWSE_BIN=$RUNNER_TEMP/browse/package/bin/browse" >> "$GITHUB_ENV"
+
+      - name: Gates
+        run: npm run gates
