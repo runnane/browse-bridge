@@ -1,4 +1,6 @@
 node_modules/
+# electron-builder's output (npm run dist).
+dist/
 .claude/worktrees/
 *.pristine
 # The tracker token lives here (env.RESPAWN_MCP_TOKEN).

@@ -421,12 +421,13 @@ export function browseView(snap, upstream) {
 }
 
 /**
- * The "Show in application menu" checkbox from main's { packaged, enabled }.
- * A packaged build ships its own menu entry, so the checkbox is hidden there
- * (and before main has answered).
+ * The "Show in application menu" checkbox from main's { offered, enabled }.
+ * A source checkout and an AppImage offer it; a build installed by a package
+ * manager ships its own menu entry, so the checkbox is hidden there (and
+ * before main has answered).
  */
 export function appMenuView(info) {
-  if (!info || info.packaged) return { hidden: true, checked: false };
+  if (!info || !info.offered) return { hidden: true, checked: false };
   return { hidden: false, checked: Boolean(info.enabled) };
 }
 

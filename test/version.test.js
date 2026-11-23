@@ -43,6 +43,24 @@ function commitOther(dir, name) {
   git(dir, 'commit', '-q', '-m', name);
 }
 
+test('version: a packaged build returns the given version and never calls git, even inside a checkout (BBR-70)', () => {
+  const dir = tempRepo();
+  return withDir(dir, async () => {
+    const calls = [];
+    const recording = (cmd, args) => {
+      calls.push([cmd, ...args]);
+      throw new Error('git must not run for a packaged build');
+    };
+    const given = await readVersion(dir, { exec: recording, packaged: true, version: '0.3.1' });
+    assert.deepEqual(calls, [], 'a packaged build makes no git call');
+    assert.equal(given, '0.3.1');
+    // without a passed version it falls back to package.json's, still without git
+    const fallback = await readVersion(dir, { exec: recording, packaged: true });
+    assert.deepEqual(calls, [], 'a packaged build makes no git call');
+    assert.equal(fallback, '0.1.0');
+  });
+});
+
 test('version: the commit that set the version gives <package version>+0 <short commit>', () => {
   const dir = tempRepo();
   return withDir(dir, async () => {

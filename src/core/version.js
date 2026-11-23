@@ -29,8 +29,12 @@ async function git(exec, dir, args, timeoutMs) {
  * git errors or hangs, just "0.1.0"; if only the count fails, "+N" is dropped.
  * Never throws; each git call is bounded by `timeoutMs`. `exec` is injectable
  * for tests.
+ *
+ * A packaged build (`packaged: true`) runs from an asar archive, where git
+ * cannot work: it returns `version` (the caller passes `app.getVersion()`),
+ * else the package.json version, and makes no git call at all.
  */
-export async function readVersion(dir, { exec = run, timeoutMs = GIT_TIMEOUT_MS } = {}) {
+export async function readVersion(dir, { exec = run, timeoutMs = GIT_TIMEOUT_MS, packaged = false, version = '' } = {}) {
   let pkg = '';
   try {
     pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version ?? '';
@@ -38,6 +42,7 @@ export async function readVersion(dir, { exec = run, timeoutMs = GIT_TIMEOUT_MS 
     // an unreadable package.json leaves the version blank rather than failing start-up
   }
   const base = pkg || '?';
+  if (packaged) return version || base;
   const [sha, status, build] = await Promise.all([
     git(exec, dir, ['rev-parse', '--short', 'HEAD'], timeoutMs),
     git(exec, dir, ['status', '--porcelain'], timeoutMs),

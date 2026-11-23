@@ -342,11 +342,13 @@ test('viewmodel: the update notice shows in the status bar only when there is on
   assert.deepEqual([updating.bar, updating.showUpdate, updating.canUpdate], ['Updating browse-bridge…', true, false], 'the button stays, disabled, while it runs');
 });
 
-test('viewmodel: the application-menu checkbox is hidden for a packaged build and follows the entry otherwise (BBR-48)', () => {
-  assert.deepEqual(appMenuView({ packaged: true, enabled: true }), { hidden: true, checked: false });
+test('viewmodel: the application-menu checkbox is hidden where the entry is not offered and follows the entry otherwise (BBR-48, BBR-70)', () => {
+  // not offered: a package-manager build ships its own entry
+  assert.deepEqual(appMenuView({ offered: false, enabled: true }), { hidden: true, checked: false });
   assert.deepEqual(appMenuView(null), { hidden: true, checked: false });
-  assert.deepEqual(appMenuView({ packaged: false, enabled: true }), { hidden: false, checked: true });
-  assert.deepEqual(appMenuView({ packaged: false, enabled: false }), { hidden: false, checked: false });
+  // offered: a source checkout, and since BBR-70 an AppImage too
+  assert.deepEqual(appMenuView({ offered: true, enabled: true }), { hidden: false, checked: true });
+  assert.deepEqual(appMenuView({ offered: true, enabled: false }), { hidden: false, checked: false });
 });
 
 // ---------- formatting ----------

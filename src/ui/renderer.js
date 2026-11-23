@@ -899,7 +899,7 @@ $('btnOpenConfig').onclick = () => bridge.openConfigFile().catch((err) => addFla
 $('autostart').addEventListener('change', (ev) => bridge.setAutostart(ev.target.checked));
 $('appMenu').addEventListener('change', (ev) => bridge.setAppMenu(ev.target.checked).catch((err) => addFlash('bad', cleanError(err.message))));
 
-/** Show in application menu: hidden for a packaged build; the box follows the entry on disk. */
+/** Show in application menu: hidden for a package-manager build (not an AppImage); the box follows the entry on disk. */
 async function fillAppMenu() {
   const v = appMenuView(await bridge.appMenu());
   $('appMenuRow').hidden = v.hidden;
