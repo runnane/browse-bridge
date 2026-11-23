@@ -353,6 +353,34 @@ the same policy as `bin/browse-bridge`. It uses the static AppImage runtime,
 so it needs FUSE 3's `fusermount3` but not libfuse2 (absent from a default
 Ubuntu 24.04). Without FUSE at all, run it with `APPIMAGE_EXTRACT_AND_RUN=1`.
 
+### Cutting a release
+
+A release is a `v*` tag pushed to `main`. The tag push, and nothing else,
+builds the AppImage, smokes it headlessly, and publishes it to GitHub Releases
+with `latest-linux.yml` (the updater's feed) and `SHA256SUMS`
+(`.github/workflows/release.yml`). `main` takes no direct pushes, so the
+version bump is an ordinary PR and the tag comes after it merges:
+
+1. On a topic branch cut from fresh `origin/main` (named for the release
+   issue, e.g. `chore/bbr-99-release-0-2-0`), run `pnpm run release`.
+   release-it picks the bump from the conventional commits since the last tag,
+   rewrites `package.json`'s `version` and commits it. It does not tag, push
+   or publish; `.release-it.json` turns those off.
+2. Push the branch and open a PR carrying the release issue's key. Merge it
+   once `gates` is green.
+3. On the merge commit, push the tag, which must be `v` plus the new version
+   (the workflow's first step fails any other tag):
+
+   ```bash
+   git fetch origin
+   git tag v0.2.0 origin/main
+   git push origin v0.2.0
+   ```
+
+The workflow runs the same gates as every PR, then the build, then the smoke
+render, and publishes only if all of them are green. Changes to the workflow
+itself run all of it except the publish on their PR.
+
 ## Credits and affiliation
 
 All of the browser automation — the `browse` MCP server, the relay and the

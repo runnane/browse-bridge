@@ -1,0 +1,150 @@
+# Builds, smokes and publishes the AppImage when a v* tag is pushed (BBR-72).
+#
+#   guard -> gates (the gates workflow, called) -> build (+ smoke, checksums) -> publish
+#
+# The tag is pushed by a human after the release-it bump PR has merged (README,
+# "Cutting a release"). Only a tag push publishes. The pull_request trigger is
+# the dry run: it runs everything except publish, on any change to this
+# workflow or what it builds with. (workflow_dispatch cannot run a workflow
+# file that is not on the default branch yet, so a PR run is the only way to
+# prove the first version before it merges.)
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/gates.yml
+      - scripts/**
+      - package.json
+      - pnpm-lock.yaml
+
+permissions:
+  contents: read
+
+env:
+  PNPM_VERSION: 10.33.3
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # The tag must be v + package.json's version. A dry run has no tag, so it
+      # checks the script against the version it would be released as.
+      - name: Tag guard
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v$(node -p "JSON.parse(fs.readFileSync('package.json','utf8')).version")"
+          fi
+          node scripts/check-release-tag.js "$tag"
+
+  # The same gates, from the same file: a release is never built from a red tree.
+  gates:
+    needs: guard
+    uses: ./.github/workflows/gates.yml
+
+  build:
+    needs: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        run: npm install -g "pnpm@$PNPM_VERSION"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the AppImage
+        run: pnpm run dist
+
+      # Headless render of the built AppImage in a throwaway HOME with a
+      # throwaway config (.agents/gates.md, "The AppImage render"). A renderer
+      # load error makes the app hang and write no JSON, so timeout 90 (exit
+      # 124) and a missing file are both red. The app log line proves which
+      # config was read.
+      - name: Smoke the AppImage
+        run: |
+          version="$(node -p "JSON.parse(fs.readFileSync('package.json','utf8')).version")"
+          appimage="$(ls dist/*.AppImage)"
+          echo "smoking $appimage, expecting version $version"
+          smoke="$RUNNER_TEMP/smoke"
+          mkdir -p "$smoke/home/.config/browse-bridge" "$smoke/out"
+          printf '%s\n' '{"hosts":[{"id":"smoke-1","name":"Smoke one","host":"smoke@one.invalid","autoConnect":false},{"id":"smoke-2","name":"Smoke two","host":"smoke@two.invalid","autoConnect":false}]}' > "$smoke/home/.config/browse-bridge/config.json"
+          unset XDG_CONFIG_HOME
+          set +e
+          APPIMAGE_EXTRACT_AND_RUN=1 HOME="$smoke/home" BB_SMOKE_OUT="$smoke/out/smoke" \
+            timeout 90 "$appimage" --ozone-platform=headless --no-sandbox
+          status=$?
+          set -e
+          echo "AppImage exit status: $status"
+          cat "$smoke/home/.config/browse-bridge/logs/app.log" || true
+          test "$status" -eq 0
+          cat "$smoke/out/smoke.json"
+          node scripts/check-smoke.js "$smoke/out/smoke.json" "$version"
+          echo "SMOKE_JSON=$smoke/out/smoke.json" >> "$GITHUB_ENV"
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum ./*.AppImage latest-linux.yml | sed 's# \./# #' > SHA256SUMS
+          cat SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Upload the release files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-files
+          if-no-files-found: error
+          path: |
+            dist/*.AppImage
+            dist/latest-linux.yml
+            dist/SHA256SUMS
+
+      - name: Upload the smoke output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smoke-output
+          if-no-files-found: error
+          path: ${{ runner.temp }}/smoke/out/
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-files
+          path: release
+
+      # latest-linux.yml is electron-updater's feed: it must be uploaded.
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l release
+          prerelease=""
+          case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --generate-notes $prerelease \
+            release/*.AppImage release/latest-linux.yml release/SHA256SUMS
