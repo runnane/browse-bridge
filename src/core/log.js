@@ -5,7 +5,7 @@ const PAIR_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/g;
 
 /** Pairing codes are one-time secrets: they never reach the log file or the ring buffer. */
 export function redact(text) {
-  return String(text);
+  return String(text).replace(PAIR_CODE, '****-****');
 }
 
 /**
