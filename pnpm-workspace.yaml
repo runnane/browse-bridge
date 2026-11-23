@@ -3,3 +3,9 @@
 # binary on first launch, so both work.
 allowBuilds:
   electron: true
+
+# BBR-78: GHSA-g3hv-75wg-m249 hits minimatch >=7 <11.0.1, pulled in by
+# electron-builder 26.18.1 (no newer stable release). Scoped to the vulnerable
+# range, so the 3.x and 5.x copies are left alone.
+overrides:
+  "minimatch@>=7 <11.0.1": ">=11.0.1"
