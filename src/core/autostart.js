@@ -49,6 +49,30 @@ export function desktopEntry(execArgv, { menu = false } = {}) {
   ].join('\n');
 }
 
+/**
+ * The plain launch argv that the autostart and application-menu entries name.
+ * A source checkout runs its own `bin/browse-bridge`. A packaged AppImage runs
+ * `$APPIMAGE`, the file the user keeps: its `execPath` is the transient
+ * `/tmp/.mount_*` mount, gone after the next launch. Any other packaged build
+ * runs its `execPath`. `packaged` is checked first, so a source run started
+ * from inside some other AppImage (which inherits `$APPIMAGE`) still names the
+ * checkout.
+ */
+export function launcherArgv({ packaged, execPath, appPath, env = process.env }) {
+  if (!packaged) return [join(appPath, 'bin', 'browse-bridge')];
+  if (env.APPIMAGE) return [env.APPIMAGE];
+  return [execPath];
+}
+
+/**
+ * Whether the app offers to write its own application-menu entry. A source
+ * checkout and an AppImage install none by themselves; a build installed by a
+ * package manager ships its own, so it is not offered there.
+ */
+export function offersAppMenu({ packaged, env = process.env }) {
+  return !packaged || Boolean(env.APPIMAGE);
+}
+
 /** The flag the login autostart passes so the app starts in the tray without a window. */
 export const HIDDEN_FLAG = '--hidden';
 

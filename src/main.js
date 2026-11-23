@@ -8,7 +8,7 @@ import { buildDiagnostics } from './core/diagnostics.js';
 import { Logger } from './core/log.js';
 import { timed, createLagMonitor } from './core/stall.js';
 import { HOST_ACTIONS, HostManager, runHostAction } from './core/hosts.js';
-import { autostartArgv, isAppMenuEnabled, isAutostartEnabled, setAppMenu, setAutostart, startsHidden } from './core/autostart.js';
+import { autostartArgv, isAppMenuEnabled, isAutostartEnabled, launcherArgv, offersAppMenu, setAppMenu, setAutostart, startsHidden } from './core/autostart.js';
 import { HostNotifier, TrayRenderer, coalesce, trayView } from './core/tray.js';
 import { readVersion } from './core/version.js';
 import { aboutInfo, linkUrl } from './core/about.js';
@@ -67,14 +67,19 @@ const paths = () => {
   };
 };
 
-/** The argv autostart re-launches: the packaged binary, or the source checkout's launcher. */
+/** The argv autostart re-launches: $APPIMAGE, the packaged binary, or the source checkout's launcher. */
 function launchArgv() {
   return autostartArgv(menuArgv());
 }
 
-/** The same launch without --hidden: the application-menu entry shows the window. */
+/** The same launch without --hidden: the application-menu entry shows the window (core/autostart.js's launcherArgv). */
 function menuArgv() {
-  return app.isPackaged ? [process.execPath] : [join(app.getAppPath(), 'bin', 'browse-bridge')];
+  return launcherArgv({ packaged: app.isPackaged, execPath: process.execPath, appPath: app.getAppPath() });
+}
+
+/** Whether this build writes its own application-menu entry: a source checkout or an AppImage. */
+function appMenuOffered() {
+  return offersAppMenu({ packaged: app.isPackaged });
 }
 
 function icon(state) {
@@ -90,7 +95,8 @@ async function start() {
   logger = new Logger({ file: p.log });
   store = new ConfigStore(p.config);
   const config = openConfig();
-  appVersion = await readVersion(appDir); // bounded: each git call has a short timeout
+  // Bounded: each git call has a short timeout. A packaged build makes none (git cannot read the asar).
+  appVersion = await readVersion(appDir, { packaged: app.isPackaged, version: app.getVersion() });
   lagMonitor = createLagMonitor(logger);
   lagMonitor.start();
   hosts = new HostManager({ logger, controlDir: p.control });
@@ -128,8 +134,8 @@ async function start() {
 
   // Keep an existing login entry in the current form (earlier releases wrote it without --hidden).
   if (isAutostartEnabled()) setAutostart(true, launchArgv());
-  // Likewise the application-menu entry follows the checkout's current location (never for a packaged build).
-  if (!app.isPackaged && isAppMenuEnabled()) setAppMenu(true, menuArgv());
+  // Likewise the application-menu entry follows the checkout's or the AppImage's current location.
+  if (appMenuOffered() && isAppMenuEnabled()) setAppMenu(true, menuArgv());
   // A launch by hand shows the window; only the login autostart (--hidden) starts in the tray.
   // An unreadable config file always shows the window: it carries the error and the Reload / Start over choice.
   if (!startsHidden(process.argv) || hosts.snapshot().overall === 'none' || store.failure) showWindow();
@@ -606,9 +612,9 @@ function registerIpc() {
   ipcMain.handle('copy', (_e, text) => clipboard.writeText(String(text)));
   ipcMain.handle('openLogFile', () => shell.openPath(paths().log));
   ipcMain.handle('autostart', () => isAutostartEnabled());
-  ipcMain.handle('appMenu', () => ({ packaged: app.isPackaged, enabled: isAppMenuEnabled() }));
+  ipcMain.handle('appMenu', () => ({ offered: appMenuOffered(), enabled: isAppMenuEnabled() }));
   ipcMain.handle('setAppMenu', (_e, on) => {
-    if (app.isPackaged) return; // the package ships its own entry
+    if (!appMenuOffered()) return; // a package-manager build ships its own entry
     setAppMenu(Boolean(on), menuArgv());
   });
   ipcMain.handle('setAutostart', (_e, on) => {

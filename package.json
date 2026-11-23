@@ -13,9 +13,41 @@
     "start": "electron .",
     "test": "BB_FORBID_SSH=1 node --test test/",
     "check": "node scripts/check-syntax.js",
-    "gates": "node scripts/check-syntax.js && BB_FORBID_SSH=1 node --test test/"
+    "gates": "node scripts/check-syntax.js && BB_FORBID_SSH=1 node --test test/",
+    "dist": "electron-builder --linux AppImage --publish never"
   },
   "devDependencies": {
-    "electron": "45.3.4"
+    "electron": "45.3.4",
+    "electron-builder": "26.18.1"
+  },
+  "build": {
+    "appId": "io.github.runnane.browse-bridge",
+    "productName": "browse-bridge",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**",
+      "package.json",
+      "LICENSE"
+    ],
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Network",
+      "artifactName": "browse-bridge-${arch}.AppImage"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "runnane",
+      "repo": "browse-bridge",
+      "releaseType": "release"
+    }
   }
 }

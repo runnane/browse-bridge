@@ -336,6 +336,22 @@ BB_SMOKE_OUT=/tmp/bb bin/browse-bridge --ozone-platform=headless   # render the 
 The integration test runs the controller against the real browse binary in a
 throwaway `HOME` on ports 39988–39991, and stops the relay it started.
 
+### Build an AppImage locally
+
+```bash
+pnpm install       # or: npm install
+pnpm run dist      # → dist/browse-bridge-x86_64.AppImage
+```
+
+`dist` runs electron-builder with `--publish never`; nothing is uploaded from a
+local build. The file name carries no version, so the autostart and
+application-menu entries the app writes (they name `$APPIMAGE`, not the
+transient `/tmp/.mount_*` path) keep working after the file is replaced.
+The AppImage keeps Chromium's sandbox where unprivileged user namespaces work,
+and starts with `--no-sandbox` where they do not (Ubuntu 24.04+ by default),
+the same policy as `bin/browse-bridge`. Without FUSE, run it with
+`APPIMAGE_EXTRACT_AND_RUN=1`.
+
 ## Credits and affiliation
 
 All of the browser automation — the `browse` MCP server, the relay and the

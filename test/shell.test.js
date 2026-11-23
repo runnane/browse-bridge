@@ -7,7 +7,8 @@ import { inflateSync } from 'node:zlib';
 import { iconPng, ICON_STATES, trayIconPng, TRAY_ICON_STATES } from '../src/icons.js';
 import { AGGREGATE } from '../src/core/hosts.js';
 import {
-  MENU_ICON_SIZES, appMenuIconPath, appMenuPath, autostartArgv, autostartPath, desktopEntry, isAppMenuEnabled, isAutostartEnabled, setAppMenu, setAutostart, startsHidden,
+  MENU_ICON_SIZES, appMenuIconPath, appMenuPath, autostartArgv, autostartPath, desktopEntry, isAppMenuEnabled, isAutostartEnabled, launcherArgv, offersAppMenu,
+  setAppMenu, setAutostart, startsHidden,
 } from '../src/core/autostart.js';
 import { OVERALL } from '../src/core/controller.js';
 
@@ -87,6 +88,41 @@ test('app menu: the entry quotes Exec, carries an Icon and never --hidden; untic
   // the shared builder still makes the autostart form by default
   assert.match(desktopEntry(['a']), /^X-GNOME-Autostart-enabled=true$/m);
   assert.doesNotMatch(desktopEntry(['a']), /^Icon=/m);
+});
+
+// BBR-70: inside an AppImage execPath is the transient /tmp/.mount_* mount; $APPIMAGE is the file the user keeps.
+const APPIMAGE = '/home/user/My Apps/browse-bridge-x86_64.AppImage';
+const MOUNT_EXEC = '/tmp/.mount_browseAbC123/browse-bridge';
+
+test('launcher: a packaged AppImage launches $APPIMAGE, never the transient mount', () => {
+  const argv = launcherArgv({ packaged: true, execPath: MOUNT_EXEC, appPath: '/tmp/.mount_browseAbC123/resources/app.asar', env: { APPIMAGE } });
+  assert.deepEqual(argv, [APPIMAGE]);
+});
+
+test('launcher: another packaged build launches its execPath; a source checkout its bin/browse-bridge', () => {
+  assert.deepEqual(launcherArgv({ packaged: true, execPath: '/opt/browse-bridge/browse-bridge', appPath: '/opt/browse-bridge/resources/app.asar', env: {} }), ['/opt/browse-bridge/browse-bridge']);
+  assert.deepEqual(launcherArgv({ packaged: false, execPath: '/x/electron', appPath: '/home/user/browse-bridge', env: {} }), ['/home/user/browse-bridge/bin/browse-bridge']);
+  // a source run started from inside some other AppImage inherits $APPIMAGE; it still names the checkout
+  assert.deepEqual(launcherArgv({ packaged: false, execPath: '/x/electron', appPath: '/home/user/browse-bridge', env: { APPIMAGE: '/opt/Other.AppImage' } }), ['/home/user/browse-bridge/bin/browse-bridge']);
+});
+
+test('app menu: offered for a source checkout and an AppImage, not for a package-manager build', () => {
+  assert.equal(offersAppMenu({ packaged: false, env: {} }), true);
+  assert.equal(offersAppMenu({ packaged: true, env: { APPIMAGE } }), true);
+  assert.equal(offersAppMenu({ packaged: true, env: {} }), false);
+});
+
+test('app menu and autostart entries for an AppImage name $APPIMAGE in Exec=, quoted for the space', () => {
+  const data = mkdtempSync(join(tmpdir(), 'bb-data-'));
+  const config = mkdtempSync(join(tmpdir(), 'bb-cfg-'));
+  const env = { HOME: data, XDG_DATA_HOME: data, XDG_CONFIG_HOME: config, APPIMAGE };
+  const launcher = launcherArgv({ packaged: true, execPath: MOUNT_EXEC, appPath: '/tmp/.mount_browseAbC123/resources/app.asar', env });
+  setAppMenu(true, launcher, env);
+  const menu = readFileSync(appMenuPath(env), 'utf8');
+  assert.match(menu, /^Exec="\/home\/user\/My Apps\/browse-bridge-x86_64\.AppImage"$/m);
+  assert.doesNotMatch(menu, /\.mount_/);
+  setAutostart(true, autostartArgv(launcher), env);
+  assert.match(readFileSync(autostartPath(env), 'utf8'), /^Exec="\/home\/user\/My Apps\/browse-bridge-x86_64\.AppImage" --hidden$/m);
 });
 
 test('autostart: the login entry starts hidden; a launch by hand does not', () => {
