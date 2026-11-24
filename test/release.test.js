@@ -50,17 +50,33 @@ test('release workflow: the guard job checks out full history for the ancestry c
   assert.match(guard, /fetch-depth: 0/);
 });
 
+/**
+ * Run the tag guard CLI on the version check alone. The gates also run inside the
+ * release workflow on a tag push (BBR-84), where the runner sets GITHUB_REF_TYPE=tag
+ * and GITHUB_SHA: inherited, they turn on the main-ancestry check, which fails on
+ * the gates job's shallow checkout (no origin/main). That check has its own tests above.
+ */
+const runTagGuard = (tag, base = process.env) => {
+  const env = { ...base };
+  delete env.GITHUB_REF_TYPE;
+  delete env.GITHUB_SHA;
+  try {
+    execFileSync(process.execPath, ['scripts/check-release-tag.js', tag], { stdio: 'pipe', env });
+    return 0;
+  } catch (e) {
+    return e.status;
+  }
+};
+
 test('tag guard CLI: exits 0 for this package.json version and 1 for another', () => {
-  const run = (tag) => {
-    try {
-      execFileSync(process.execPath, ['scripts/check-release-tag.js', tag], { stdio: 'pipe' });
-      return 0;
-    } catch (e) {
-      return e.status;
-    }
-  };
-  assert.equal(run(`v${pkg.version}`), 0);
-  assert.equal(run(`v${pkg.version}.1`), 1);
+  assert.equal(runTagGuard(`v${pkg.version}`), 0);
+  assert.equal(runTagGuard(`v${pkg.version}.1`), 1);
+});
+
+test('tag guard CLI test: a tag-push environment does not reach the version check (BBR-84)', () => {
+  // What the release workflow's gates job inherits on a tag push, with a commit no main has.
+  const tagPush = { ...process.env, GITHUB_REF_TYPE: 'tag', GITHUB_SHA: '0'.repeat(40) };
+  assert.equal(runTagGuard(`v${pkg.version}`, tagPush), 0);
 });
 
 test('smoke check: clean output showing the version passes', () => {
