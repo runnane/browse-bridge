@@ -31,6 +31,7 @@ for the gates to run without `BROWSE_BIN`, and say so whenever they do.
 
 | date | call | verdict |
 | --- | --- | --- |
+| 2026-11-24 | the plain step for 0.1.5, alone, unattended orchestrator session not worktree-isolated (BBR-89 sweep) | passed |
 | 2026-11-23 | the plain step for 0.1.4, alone (BBR-76) | refused, *Undermining Oversight* |
 | 2026-11-23 | the plain step for 0.1.5, alone (BBR-76) | refused, *Undermining Oversight* |
 | 2026-11-22 | the plain step for 0.1.5, alone, retried unaltered after the owner confirmed it in an attended session (BBR-40) | passed |
