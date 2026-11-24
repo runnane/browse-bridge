@@ -16,6 +16,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { testConnection } from '../src/core/sshtest.js';
+import { sshdStartMessage } from './support/sshd-log.js';
 
 const SSHD = '/usr/sbin/sshd';
 const SSH_PORT = 39924;
@@ -59,7 +60,7 @@ test('test connection over real ssh: success, an unknown host key, an unaccepted
     'UsePAM no', 'StrictModes no', `SetEnv HOME=${home}`, '',
   ].join('\n'));
   execFileSync(SSHD, ['-f', join(dir, 'sshd_config'), '-E', join(dir, 'sshd.log')]);
-  assert.ok(await waitFor(() => existsSync(pidFile), 5000), 'sshd started');
+  assert.ok(await waitFor(() => existsSync(pidFile), 5000), sshdStartMessage(join(dir, 'sshd.log')));
 
   // The user's own ~/.ssh/config still applies to these calls, so everything that matters is passed explicitly.
   const opts = (key, knownHosts) => [
