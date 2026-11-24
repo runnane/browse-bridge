@@ -18,7 +18,7 @@ import { normalizeConfig } from '../src/core/config.js';
 import { Logger } from '../src/core/log.js';
 import { Controller } from '../src/core/controller.js';
 import { pairWithCode } from './support/pair-client.js';
-import { sshdStartMessage } from './support/sshd-log.js';
+import { startTestSshd } from './support/sshd-log.js';
 
 const BIN = process.env.BROWSE_BIN;
 const SSHD = '/usr/sbin/sshd';
@@ -58,9 +58,8 @@ test('ssh transport: setup, tunnel, status, pairing and traffic over real ssh', 
     'UsePAM no', 'StrictModes no', 'AllowTcpForwarding yes',
     `SetEnv HOME=${home} OPENCODE_BROWSER_PORT=${RELAY_PORT} OPENCODE_BROWSER_AUTO_UPDATE=off`, '',
   ].join('\n'));
-  execFileSync(SSHD, ['-f', join(dir, 'sshd_config'), '-E', join(dir, 'sshd.log')]);
-  assert.ok(await waitFor(() => existsSync(join(dir, 'sshd.pid')), 5000), sshdStartMessage(join(dir, 'sshd.log')));
-  const sshdPid = Number(readFileSync(join(dir, 'sshd.pid'), 'utf8'));
+  // Our own foreground child (BBR-93): stopped by the pid we spawned, never by name.
+  const sshd = await startTestSshd({ sshd: SSHD, config: join(dir, 'sshd_config'), log: join(dir, 'sshd.log'), pidFile: join(dir, 'sshd.pid') });
 
   const controlDir = join(dir, 'cm');
   const cfg = normalizeConfig({
@@ -73,7 +72,7 @@ test('ssh transport: setup, tunnel, status, pairing and traffic over real ssh', 
     await ctl.disconnect();
     const relay = pidOnPort(RELAY_PORT);
     if (relay) process.kill(relay, 'SIGTERM');
-    process.kill(sshdPid, 'SIGTERM');
+    sshd.stop();
   });
 
   const setup = await ctl.setupRemote();

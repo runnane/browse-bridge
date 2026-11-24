@@ -16,33 +16,16 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { testConnection } from '../src/core/sshtest.js';
-import { sshdStartMessage } from './support/sshd-log.js';
+import { startTestSshd } from './support/sshd-log.js';
 
 const SSHD = '/usr/sbin/sshd';
 const SSH_PORT = 39924;
 const skip = !existsSync(SSHD) && 'no sshd';
 
-async function waitFor(fn, ms) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (await fn()) return true;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  return false;
-}
-
 test('test connection over real ssh: success, an unknown host key, an unaccepted client key', { skip }, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'bb-sshtest-'));
   chmodSync(dir, 0o700);
   const pidFile = join(dir, 'sshd.pid');
-  // Registered before anything can fail: sshd is stopped by the pid its own pid file names, never by name.
-  t.after(() => {
-    if (!existsSync(pidFile)) return;
-    const pid = Number(readFileSync(pidFile, 'utf8'));
-    if (pid > 0) {
-      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
-    }
-  });
 
   const home = join(dir, 'home');
   mkdirSync(join(home, '.local', 'bin'), { recursive: true });
@@ -59,8 +42,9 @@ test('test connection over real ssh: success, an unknown host key, an unaccepted
     `AuthorizedKeysFile ${join(dir, 'authorized_keys')}`, 'PasswordAuthentication no', 'KbdInteractiveAuthentication no',
     'UsePAM no', 'StrictModes no', `SetEnv HOME=${home}`, '',
   ].join('\n'));
-  execFileSync(SSHD, ['-f', join(dir, 'sshd_config'), '-E', join(dir, 'sshd.log')]);
-  assert.ok(await waitFor(() => existsSync(pidFile), 5000), sshdStartMessage(join(dir, 'sshd.log')));
+  // Our own foreground child: stopped by the pid we spawned, never by name, even if it never wrote its pid file.
+  const sshd = await startTestSshd({ sshd: SSHD, config: join(dir, 'sshd_config'), log: join(dir, 'sshd.log'), pidFile });
+  t.after(sshd.stop);
 
   // The user's own ~/.ssh/config still applies to these calls, so everything that matters is passed explicitly.
   const opts = (key, knownHosts) => [
