@@ -1,6 +1,6 @@
-// BBR-95: the POSIX shell the setup-script tests run under. Every CI and dev
-// box this runs on today has dash as /bin/sh, so the bash-/bin/sh branch is
-// reached only through the injected `bash` and `find` below.
+// BBR-95: the POSIX shell the setup-script tests run under. CI and
+// Debian-family boxes have dash as /bin/sh, so there the bash-/bin/sh branch
+// is reached only through the injected `bash` and `find` below.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
