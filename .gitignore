@@ -6,6 +6,5 @@ dist/
 # The tracker token lives here (env.RESPAWN_MCP_TOKEN).
 # Must be covered by this file, not by a machine-wide ignore.
 .claude/settings.local.json
-# The MCP server config is local, not tracked: it names an internal system (BBR-23).
-# Must be covered by this file, not by a machine-wide ignore.
-.mcp.json
+# .mcp.json is tracked (BBR-31): its url and token are ${RESPAWN_MCP_URL} and
+# ${RESPAWN_MCP_TOKEN}, expanded from the user-level env, so it names no host.
