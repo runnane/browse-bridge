@@ -77,6 +77,15 @@ the link (which browse itself does not encrypt) rides inside SSH.
 - **Status:** polls `browse status --json` over ssh (multiplexed): relay,
   extension, paired browsers, agent tabs, auto-update. Anything unmeasured
   shows as *unknown*, not healthy.
+- **Browsers:** under Status, one row per browser the host's relay lists: its
+  name (as the extension reports it, e.g. "Brave on laptop"), its id, whether
+  it is connected, which one is the default, and its agent tabs. The id (or
+  the name) is what an agent passes as `browser` when it opens a tab, so two
+  agents on one host can each drive their own browser; **Copy id** copies it.
+  **Unpair…** asks first, then runs `browse pair --revoke <id>` on that host,
+  and reports success only once the relay no longer lists the browser. An
+  unpaired browser needs a new pairing code to come back. The name comes from
+  browse; browse-bridge only shows it.
 - **Traffic:** bytes up/down, live rate, connections open/total/failed, and a
   per-connection log line. On a host's own loopback address (`127.0.0.2`, …)
   it reads the browser's request heads only to rename that exact address in
@@ -304,7 +313,7 @@ extension keeps one relay address and one connection. So:
 - To give one host two browsers (say, two agent sessions there, each driving
   its own), pair the second browser with the **same** host: **Pair Browser…**
   issues a fresh code even while one browser is connected. The relay then
-  lists both (`browse pair --list` on the host), and an agent picks one with
+  lists both (the Status tab's **Browsers** list), and an agent picks one with
   the `browser` argument when it opens a tab (`tabs` with `action: "new"`);
   without it, a tab opens in the first connected browser.
 

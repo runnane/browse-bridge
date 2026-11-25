@@ -279,6 +279,28 @@ export function browserIds(browsers) {
 }
 
 /**
+ * The browsers a relay lists, one entry each (BBR-98): `id` is what an agent
+ * passes as `browser` (and what Unpair revokes), `name` what the extension
+ * calls it. A field the relay did not report is null, never a guess; an entry
+ * with no id is left out, because nothing could address it. Null when there
+ * is no list at all.
+ */
+export function browserList(browsers) {
+  if (!Array.isArray(browsers)) return null;
+  const str = (v) => (typeof v === 'string' && v ? v : null);
+  const bool = (v) => (typeof v === 'boolean' ? v : null);
+  return browsers
+    .filter((b) => b && typeof b === 'object' && str(b.id))
+    .map((b) => ({
+      id: b.id,
+      name: str(b.name),
+      connected: bool(b.connected),
+      default: bool(b.default),
+      tabs: typeof b.tabs === 'number' ? b.tabs : null,
+    }));
+}
+
+/**
  * Collapse `browse status --json` into what the UI shows. Every field that is
  * absent stays null; the UI renders null as "unknown", never as healthy.
  */
@@ -293,6 +315,7 @@ export function summarizeStatus(s) {
     pairingState: ext.pairingState ?? s.pairingState ?? null,
     browsers: Array.isArray(ext.browsers) ? ext.browsers.length : null,
     browserIds: browserIds(ext.browsers),
+    browserList: browserList(ext.browsers),
     activeTargets: typeof ext.activeTargets === 'number' ? ext.activeTargets : null,
     tabs: Array.isArray(s.tabs) ? s.tabs.length : null,
     autoUpdate: s.autoUpdate?.effective ?? null,

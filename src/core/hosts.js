@@ -56,13 +56,15 @@ export const HOST_ACTIONS = Object.freeze({
   pair: (ctl) => ctl.pair(),
   startRelay: (ctl) => ctl.startRelay(),
   relayLog: (ctl) => ctl.relayLog(200),
+  // BBR-98: the browser id is checked against the host's last status in the controller.
+  unpairBrowser: (ctl, browserId) => ctl.unpairBrowser(browserId),
 });
 
-/** Run one HOST_ACTIONS entry against host `id`. An unknown action or host throws. */
-export function runHostAction(manager, action, id) {
+/** Run one HOST_ACTIONS entry against host `id` (with the action's own argument, if any). An unknown action or host throws. */
+export function runHostAction(manager, action, id, arg) {
   const fn = Object.hasOwn(HOST_ACTIONS, action) ? HOST_ACTIONS[action] : null;
   if (!fn) throw new Error(`no host action "${action}"`);
-  return fn(manager.controller(id));
+  return fn(manager.controller(id), arg);
 }
 
 /** Kicks closer together than this are one event: resume and unlock-screen often fire together (BBR-38). */

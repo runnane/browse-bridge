@@ -456,6 +456,82 @@ test('controller: Pair Browser records the browsers the relay listed before the 
   assert.equal((await ctl.pair()).browsersBefore, null);
 });
 
+test('browse: status summary lists each browser by id and name, with unknown fields null (BBR-98)', () => {
+  const withBrowsers = (browsers) => summarizeStatus({ ...STATUS_UP, extension: { ...STATUS_UP.extension, browsers } });
+  assert.deepEqual(withBrowsers([
+    { id: 'chrome-work', name: 'Chrome on workstation', default: true, connected: true, version: '0.1.5', tabs: 2 },
+    { id: 'edge-laptop', name: 'Edge on laptop', default: false, connected: false, tabs: 0 },
+    { id: 'bare' },
+    { name: 'no id, so nothing can address it' },
+    null,
+  ]).browserList, [
+    { id: 'chrome-work', name: 'Chrome on workstation', connected: true, default: true, tabs: 2 },
+    { id: 'edge-laptop', name: 'Edge on laptop', connected: false, default: false, tabs: 0 },
+    { id: 'bare', name: null, connected: null, default: null, tabs: null },
+  ]);
+  assert.deepEqual(withBrowsers([]).browserList, []);
+  assert.equal(withBrowsers('nope').browserList, null);
+  assert.equal(summarizeStatus(STATUS_DOWN).browserList, null, 'no list is unknown, not none');
+});
+
+/** A controller whose relay lists `browsers` and answers `pair --revoke` with `revoke` (BBR-98). */
+function unpairRig({ browsers, revoke = { code: 0, stdout: '', stderr: '' }, after }) {
+  const logger = new Logger();
+  const ctl = new Controller({ config: normalizeConfig({ host: 'dev004', localAddress: '127.0.0.2' }), logger });
+  const calls = [];
+  const status = (list) => ({ ...STATUS_UP, extension: { ...STATUS_UP.extension, connected: true, browsers: list } });
+  ctl.transport = () => ({
+    kind: 'fake',
+    browse: async (args) => {
+      calls.push(args);
+      if (args[0] === 'status') {
+        return after === null
+          ? { code: 1, signal: null, stdout: '', stderr: 'relay down', timedOut: false }
+          : { code: 0, signal: null, stdout: JSON.stringify(status(after)), stderr: '', timedOut: false };
+      }
+      return { signal: null, timedOut: false, ...revoke };
+    },
+    closeMaster: async () => null,
+  });
+  ctl.status = summarizeStatus(status(browsers));
+  return { ctl, calls, logger };
+}
+
+const TWO_BROWSERS = [{ id: 'chrome-work', name: 'Chrome on workstation', connected: true, default: true }, { id: 'edge-laptop', name: 'Edge on laptop', connected: false }];
+
+test('controller: Unpair revokes a listed browser and is ok only once the relay stops listing it (BBR-98)', async () => {
+  const { ctl, calls, logger } = unpairRig({ browsers: TWO_BROWSERS, after: TWO_BROWSERS.slice(0, 1) });
+  const r = await ctl.unpairBrowser('edge-laptop');
+  assert.deepEqual(calls, [['pair', '--revoke', 'edge-laptop'], ['status', '--json']]);
+  assert.equal(r.ok, true);
+  assert.match(r.message, /unpaired Edge on laptop \(edge-laptop\)/);
+  assert.ok(logger.ring.some((e) => e.level === 'info' && e.message.includes('unpaired Edge on laptop')));
+
+  const still = unpairRig({ browsers: TWO_BROWSERS, after: TWO_BROWSERS });
+  const r2 = await still.ctl.unpairBrowser('edge-laptop');
+  assert.equal(r2.ok, false, 'exit 0 is not proof: the relay still lists it');
+  assert.match(r2.message, /still lists it/);
+
+  const unread = unpairRig({ browsers: TWO_BROWSERS, after: null });
+  assert.equal((await unread.ctl.unpairBrowser('edge-laptop')).ok, false, 'an unreadable list is not a confirmation');
+
+  const refused = unpairRig({ browsers: TWO_BROWSERS, revoke: { code: 1, stdout: 'No paired browser "edge-laptop".', stderr: '' } });
+  const r3 = await refused.ctl.unpairBrowser('edge-laptop');
+  assert.equal(r3.ok, false);
+  assert.match(r3.message, /No paired browser/);
+  assert.deepEqual(refused.calls.map((c) => c[0]), ['pair'], 'a refused revoke is not then reported as verified');
+});
+
+test('controller: Unpair never sends an id the last status did not list (BBR-98)', async () => {
+  const { ctl, calls } = unpairRig({ browsers: TWO_BROWSERS, after: TWO_BROWSERS });
+  for (const bad of ['--list', 'firefox-elsewhere', 'Chrome on workstation', '', undefined, null, 42]) {
+    await assert.rejects(ctl.unpairBrowser(bad), /no browser/, String(bad));
+  }
+  ctl.status = null;
+  await assert.rejects(ctl.unpairBrowser('chrome-work'), /no browser/, 'no status, no list, nothing sent');
+  assert.deepEqual(calls, [], 'nothing reached the remote');
+});
+
 test('overall state: every unknown input lands on unknown, not connected', () => {
   const base = { configured: true, wanted: true, tunnel: 'up', warnings: [] };
   assert.equal(computeOverall({ ...base, configured: false }), 'unconfigured');

@@ -35,3 +35,9 @@ export const ROLLBACK_BROWSE_LABEL = 'Roll back browse';
 
 /** What the browse extension is called in the Chrome Web Store and on its toolbar button, since browse 0.1.5. */
 export const EXTENSION_NAME = 'OpenCode Browse';
+
+/** The toolbar button that asks a host's relay for a one-time pairing code. */
+export const PAIR_LABEL = 'Pair Browser…';
+
+/** The Status tab's per-browser button that unpairs that browser from the host, after a confirmation (BBR-98). */
+export const UNPAIR_LABEL = 'Unpair…';

@@ -512,6 +512,39 @@ export class Controller extends EventEmitter {
     });
   }
 
+  /**
+   * Unpair one browser from this host's relay (BBR-98): `browse pair --revoke <id>`.
+   * Only an id the last status poll listed is sent, so the window can never name
+   * an arbitrary browser (or a flag) to the remote. Verified at the relay: ok only
+   * when a fresh status read no longer lists the id. Returns { ok, message }.
+   */
+  unpairBrowser(browserId) {
+    const listed = (this.status?.browserList ?? []).find((b) => b.id === browserId);
+    if (typeof browserId !== 'string' || !listed) {
+      return Promise.reject(new Error(`no browser "${String(browserId).slice(0, 60)}" in this host's last status`));
+    }
+    const label = listed?.name ? `${listed.name} (${browserId})` : String(browserId);
+    return this.withBusy('Unpairing browser', async () => {
+      const res = await this.transport().browse(['pair', '--revoke', browserId], { controlDir: this.controlDir, timeoutMs: 30_000 });
+      if (res.code !== 0) {
+        const message = `could not unpair ${label}: ${res.stderr.trim() || res.stdout.trim() || `exit ${res.code}`}`;
+        this.logger.error('pair', message);
+        if (this.wanted) this.pollNow();
+        return { ok: false, message };
+      }
+      const after = await this.readStatus();
+      const ids = after?.browserList?.map((b) => b.id) ?? null;
+      let result;
+      if (!ids) result = { ok: false, message: `unpair of ${label} sent, but the relay's browser list could not be read to confirm it` };
+      else if (ids.includes(browserId)) result = { ok: false, message: `unpair of ${label} sent, but the relay still lists it` };
+      else result = { ok: true, message: `unpaired ${label}; it needs a new pairing code to come back` };
+      if (result.ok) this.logger.info('pair', result.message);
+      else this.logger.warn('pair', result.message);
+      if (this.wanted) this.pollNow();
+      return result;
+    });
+  }
+
   /** Last lines of the remote relay log. */
   async relayLog(lines = 200) {
     const res = await this.transport().script(relayLogScript(lines), [], { controlDir: this.controlDir, timeoutMs: 20_000 });

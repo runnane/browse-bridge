@@ -9,7 +9,7 @@ import {
   AGENT_INSTALL_COMMAND, DEFAULT_RELAY_PORT, DEFAULT_REMOTE_BROWSE, PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration,
   appMenuView, generalView, updateView, hostRows, logForHost, logText, pairingAddressOf, pairingRedeemed, pairingView, parseGeneralForm, parseHostForm, parsePort, pickSelected, transportText, withHostSnapshot,
   aliasOptions, aliasWarning, parseTestForm, problemBar, testResultView,
-  browseView, UPGRADE_BROWSE_LABEL, ROLLBACK_BROWSE_LABEL,
+  browseView, UPGRADE_BROWSE_LABEL, ROLLBACK_BROWSE_LABEL, browsersView, unpairText, PAIR_LABEL, BROWSERS_NOTE,
 } from '../src/ui/viewmodel.js';
 
 // Two hosts as HostManager.snapshot() reports them: A on localhost:19988, B on 127.0.0.2:19988 (BBR-21).
@@ -406,4 +406,32 @@ test('agentsView: the hint command is the one the README gives', () => {
   assert.ok(given, 'README names a browse install command in backticks');
   assert.equal(given[1], AGENT_INSTALL_COMMAND);
   assert.ok(agentsView([]).hint.includes(given[1]));
+});
+
+// ---------- browsers (BBR-98) ----------
+
+test('browsers: one row per listed browser, by name and id; unreported fields read unknown, never healthy', () => {
+  const v = browsersView({ browserList: [
+    { id: 'chrome-work', name: 'Chrome on workstation', connected: true, default: true, tabs: 2 },
+    { id: 'edge-laptop', name: 'Edge on laptop', connected: false, default: false, tabs: 1 },
+    { id: 'bare', name: null, connected: null, default: null, tabs: null },
+  ] });
+  assert.equal(v.empty, '');
+  assert.deepEqual(v.rows, [
+    { id: 'chrome-work', name: 'Chrome on workstation', detail: 'connected · default · 2 tabs' },
+    { id: 'edge-laptop', name: 'Edge on laptop', detail: 'not connected · 1 tab' },
+    { id: 'bare', name: 'bare', detail: 'connection unknown' },
+  ]);
+  assert.match(browsersView({ browserList: [] }).empty, new RegExp(`No browser is paired with this host: click ${PAIR_LABEL}`));
+  for (const s of [null, {}, { browserList: null }]) {
+    assert.deepEqual(browsersView(s), { rows: [], empty: 'Unknown until the host’s status is read.' }, 'no list is unknown, not "none paired"');
+  }
+  assert.match(BROWSERS_NOTE, /passing its id \(or name\) as browser/);
+});
+
+test('browsers: the Unpair confirmation names the browser, its id and the host, and how it comes back', () => {
+  const host = { id: 'dev005', name: 'Work box' };
+  assert.equal(unpairText({ id: 'edge-laptop', name: 'Edge on laptop' }, host),
+    `Unpair Edge on laptop (edge-laptop) from Work box? Agents there can no longer use it, and it needs a new pairing code (${PAIR_LABEL}) to come back.`);
+  assert.match(unpairText({ id: 'bare', name: 'bare' }, { id: 'dev005', name: '' }), /^Unpair bare from dev005\?/);
 });

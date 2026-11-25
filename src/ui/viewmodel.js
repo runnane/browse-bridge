@@ -3,7 +3,7 @@
  * entries. No DOM and no Node imports, so the renderer loads it as an ES
  * module and test/viewmodel.test.js runs it without a display.
  */
-import { ROLLBACK_BROWSE_LABEL, UPGRADE_BROWSE_LABEL } from '../core/labels.js';
+import { PAIR_LABEL, ROLLBACK_BROWSE_LABEL, UPGRADE_BROWSE_LABEL } from '../core/labels.js';
 import { compareVersions, testedText } from '../core/browseversion.js';
 
 /** Each state has a glyph and a word, so meaning never rides on colour alone. */
@@ -61,7 +61,7 @@ export function pickSelected(hosts, selectedId) {
 /** Shared with core (tray, controller) so a message and the control it names cannot drift; see core/labels.js. */
 export {
   SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME, TEST_LABEL, SSH_OPTIONS_LABEL, CHECK_UPDATES_LABEL, UPDATE_LABEL, CHECK_NOW_LABEL,
-  UPGRADE_BROWSE_LABEL, ROLLBACK_BROWSE_LABEL,
+  UPGRADE_BROWSE_LABEL, ROLLBACK_BROWSE_LABEL, PAIR_LABEL, UNPAIR_LABEL,
 } from '../core/labels.js';
 
 /**
@@ -189,6 +189,37 @@ export function pairingView(state, selectedId, { now = Date.now(), dismissed = [
     expiresAt: h.pairing.expiresAt,
     note: PROFILE_NOTE,
   };
+}
+
+// ---------- browsers ----------
+
+/** Under the Browsers list: what the id is for (BBR-98). */
+export const BROWSERS_NOTE = 'An agent on this host picks a browser by passing its id (or name) as browser when it opens a tab; without one it gets the default.';
+
+/**
+ * The Status page's Browsers list (BBR-98) from a host's status: { rows, empty }.
+ * Each row is { id, name, detail }; `name` is the extension's own name,
+ * else the id. A field the relay did not report reads "unknown", never healthy.
+ * `empty` is the line shown instead of rows: no status yet, or no browser paired.
+ */
+export function browsersView(status) {
+  const list = status?.browserList;
+  if (!Array.isArray(list)) return { rows: [], empty: 'Unknown until the host’s status is read.' };
+  if (list.length === 0) return { rows: [], empty: `No browser is paired with this host: click ${PAIR_LABEL}` };
+  const rows = list.map((b) => {
+    const state = b.connected === true ? 'connected' : b.connected === false ? 'not connected' : 'connection unknown';
+    const parts = [state];
+    if (b.default === true) parts.push('default');
+    if (typeof b.tabs === 'number') parts.push(`${b.tabs} tab${b.tabs === 1 ? '' : 's'}`);
+    return { id: b.id, name: b.name ?? b.id, detail: parts.join(' · ') };
+  });
+  return { rows, empty: '' };
+}
+
+/** The Unpair confirmation's text: names the browser and the host, and what it takes to come back. */
+export function unpairText(row, host) {
+  const who = row.name && row.name !== row.id ? `${row.name} (${row.id})` : row.id;
+  return `Unpair ${who} from ${hostTitle(host)}? Agents there can no longer use it, and it needs a new pairing code (${PAIR_LABEL}) to come back.`;
 }
 
 // ---------- agents ----------
