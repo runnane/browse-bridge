@@ -11,7 +11,7 @@ import { timed, createLagMonitor } from '../src/core/stall.js';
 import { shQuote, shQuotePath, createTransport, sshBrowseArgs, sshScriptArgs } from '../src/core/exec.js';
 import { createCountingProxy, probePort, rewriteHostValue, rewriteRequestHead } from '../src/core/proxy.js';
 import { TunnelSupervisor, backoffMs, tunnelArgs } from '../src/core/tunnel.js';
-import { parsePairOutput, parseSetupOutput, summarizeStatus, verifySetup, endpointPort } from '../src/core/browse.js';
+import { mergeBrowsers, parsePairList, parsePairOutput, parseSetupOutput, summarizeStatus, verifySetup, endpointPort } from '../src/core/browse.js';
 import { computeOverall, Controller } from '../src/core/controller.js';
 
 test('config: rejects an ssh destination that ssh would read as an option', () => {
@@ -454,6 +454,143 @@ test('controller: Pair Browser records the browsers the relay listed before the 
   assert.deepEqual((await ctl.pair()).browsersBefore, ['stale-poll']);
   ctl.status = null;
   assert.equal((await ctl.pair()).browsersBefore, null);
+});
+
+test('browse: status summary lists each browser by id and name, with unknown fields null (BBR-98)', () => {
+  const withBrowsers = (browsers) => summarizeStatus({ ...STATUS_UP, extension: { ...STATUS_UP.extension, browsers } });
+  assert.deepEqual(withBrowsers([
+    { id: 'chrome-work', name: 'Chrome on workstation', default: true, connected: true, version: '0.1.5', tabs: 2 },
+    { id: 'edge-laptop', name: 'Edge on laptop', default: false, connected: false, tabs: 0 },
+    { id: 'bare' },
+    { name: 'no id, so nothing can address it' },
+    null,
+  ]).browserList, [
+    { id: 'chrome-work', name: 'Chrome on workstation', connected: true, default: true, tabs: 2 },
+    { id: 'edge-laptop', name: 'Edge on laptop', connected: false, default: false, tabs: 0 },
+    { id: 'bare', name: null, connected: null, default: null, tabs: null },
+  ]);
+  assert.deepEqual(withBrowsers([]).browserList, []);
+  assert.equal(withBrowsers('nope').browserList, null);
+  assert.equal(summarizeStatus(STATUS_DOWN).browserList, null, 'no list is unknown, not none');
+});
+
+/** `browse pair --list` as browse 0.1.5 prints it (measured; ids and names invented). */
+const listText = (browsers) => (browsers.length
+  ? browsers.map((b) => `${b.id}  ${b.name}\n  profile    00000000-0000-4000-8000-000000000000\n  paired     just now\n  last seen  2 min ago\n`).join('')
+  : 'No paired browsers. Run `browse pair` for a code.\n');
+
+test('browse: pair --list parses into ids and names; anything unreadable is null, not empty (BBR-98)', () => {
+  assert.deepEqual(parsePairList(listText([{ id: 'chrome-work', name: 'Chrome on workstation' }, { id: 'edge-laptop', name: 'Edge on laptop' }])),
+    [{ id: 'chrome-work', name: 'Chrome on workstation' }, { id: 'edge-laptop', name: 'Edge on laptop' }]);
+  assert.deepEqual(parsePairList(listText([])), []);
+  assert.equal(parsePairList(''), null, 'no output is unknown, not "none paired"');
+  assert.equal(parsePairList('error: relay not running\n'), null);
+  assert.equal(parsePairList(null), null);
+});
+
+test('browse: the Browsers list is every paired browser, with state from the connected ones (BBR-98)', () => {
+  const paired = [{ id: 'chrome-work', name: 'Chrome on workstation' }, { id: 'edge-laptop', name: 'Edge on laptop' }];
+  const live = [{ id: 'chrome-work', name: 'Chrome on workstation', connected: true, default: true, tabs: 2 }];
+  assert.deepEqual(mergeBrowsers(paired, live), [
+    { id: 'chrome-work', name: 'Chrome on workstation', connected: true, default: true, tabs: 2 },
+    { id: 'edge-laptop', name: 'Edge on laptop', connected: false, default: null, tabs: null },
+  ], 'paired but offline: listed, not connected');
+  assert.equal(mergeBrowsers(paired, null)[1].connected, null, 'no status list: state unknown');
+  assert.deepEqual(mergeBrowsers(null, live), live, 'no paired list: the connected ones alone');
+  assert.equal(mergeBrowsers(null, null), null);
+  assert.deepEqual(mergeBrowsers([], [{ id: 'x', name: null, connected: true, default: null, tabs: null }]).map((b) => b.id), ['x'], 'a live browser is never hidden');
+});
+
+/**
+ * A controller whose relay has paired `paired` ([{id, name}]) with `connected` ids live, and
+ * answers `pair --revoke` with `revoke`; after a revoke `pair --list` prints `listAfter`
+ * (an array of browsers, or null for a failed read) (BBR-98).
+ */
+function unpairRig({ paired, connected = [], revoke = { code: 0, stdout: '✓ Unpaired', stderr: '' }, listAfter }) {
+  const logger = new Logger();
+  const ctl = new Controller({ config: normalizeConfig({ host: 'dev004', localAddress: '127.0.0.2' }), logger });
+  const calls = [];
+  let revoked = false;
+  const live = () => paired.filter((b) => connected.includes(b.id)).map((b) => ({ ...b, connected: true }));
+  const ok = (stdout) => ({ code: 0, signal: null, stdout, stderr: '', timedOut: false });
+  ctl.transport = () => ({
+    kind: 'fake',
+    browse: async (args) => {
+      calls.push(args);
+      if (args[0] === 'status') return ok(JSON.stringify({ ...STATUS_UP, extension: { ...STATUS_UP.extension, connected: connected.length > 0, browsers: live() } }));
+      if (args[0] === 'pair' && args[1] === '--list') {
+        const list = revoked ? listAfter : paired;
+        return list === null ? { code: 1, signal: null, stdout: '', stderr: 'relay down', timedOut: false } : ok(listText(list));
+      }
+      revoked = true;
+      return { signal: null, timedOut: false, ...revoke };
+    },
+    closeMaster: async () => null,
+  });
+  ctl.wanted = true;
+  ctl.schedulePoll = () => {};
+  return { ctl, calls, logger };
+}
+
+const TWO_PAIRED = [{ id: 'chrome-work', name: 'Chrome on workstation' }, { id: 'edge-laptop', name: 'Edge on laptop' }];
+
+test('controller: the poll lists a paired browser that is offline, which the status JSON leaves out (BBR-98)', async () => {
+  const { ctl, calls } = unpairRig({ paired: TWO_PAIRED, connected: ['chrome-work'] });
+  await ctl.pollNow();
+  assert.deepEqual(calls.map((c) => c.join(' ')), ['status --json', 'pair --list']);
+  assert.deepEqual(ctl.status.browserList.map((b) => [b.id, b.connected]), [['chrome-work', true], ['edge-laptop', false]]);
+  assert.equal(ctl.status.browserListPartial, false);
+  assert.deepEqual(ctl.status.browserIds, ['chrome-work'], 'Pair Browser\'s baseline (BBR-96) still reads the status list');
+
+  const unread = unpairRig({ paired: TWO_PAIRED, connected: ['chrome-work'] });
+  unread.ctl.readPairedList = async () => null;
+  await unread.ctl.pollNow();
+  assert.deepEqual(unread.ctl.status.browserList.map((b) => b.id), ['chrome-work'], 'unreadable list: connected ones only');
+  assert.equal(unread.ctl.status.browserListPartial, true, 'and said to be partial');
+});
+
+test('controller: Unpair revokes a listed browser and is ok only once the relay stops listing it (BBR-98)', async () => {
+  const { ctl, calls, logger } = unpairRig({ paired: TWO_PAIRED, connected: ['chrome-work'], listAfter: TWO_PAIRED.slice(0, 1) });
+  await ctl.pollNow();
+  calls.length = 0;
+  ctl.wanted = false; // no follow-up poll: the calls below are Unpair's own
+  const r = await ctl.unpairBrowser('edge-laptop');
+  assert.deepEqual(calls, [['pair', '--revoke', 'edge-laptop'], ['pair', '--list']], 'an offline browser can be unpaired');
+  assert.equal(r.ok, true);
+  assert.match(r.message, /unpaired Edge on laptop \(edge-laptop\)/);
+  assert.ok(logger.ring.some((e) => e.level === 'info' && e.message.includes('unpaired Edge on laptop')));
+
+  const still = unpairRig({ paired: TWO_PAIRED, listAfter: TWO_PAIRED });
+  await still.ctl.pollNow();
+  const r2 = await still.ctl.unpairBrowser('edge-laptop');
+  assert.equal(r2.ok, false, 'exit 0 is not proof: the relay still lists it');
+  assert.match(r2.message, /still lists it/);
+
+  const unread = unpairRig({ paired: TWO_PAIRED, listAfter: null });
+  await unread.ctl.pollNow();
+  assert.equal((await unread.ctl.unpairBrowser('edge-laptop')).ok, false, 'an unreadable list is not a confirmation');
+
+  const refused = unpairRig({ paired: TWO_PAIRED, revoke: { code: 1, stdout: 'No paired browser "edge-laptop". Code ABCD-EF12', stderr: '' } });
+  await refused.ctl.pollNow();
+  refused.calls.length = 0;
+  refused.ctl.wanted = false;
+  const r3 = await refused.ctl.unpairBrowser('edge-laptop');
+  assert.equal(r3.ok, false);
+  assert.match(r3.message, /No paired browser/);
+  assert.deepEqual(refused.calls.map((c) => c[1]), ['--revoke'], 'a refused revoke is not then reported as verified');
+  assert.ok(!refused.logger.ring.some((e) => e.message.includes('ABCD-EF12')), 'a code-shaped string in the output never reaches the log');
+});
+
+test('controller: Unpair never sends an id the last status did not list (BBR-98)', async () => {
+  const { ctl, calls } = unpairRig({ paired: TWO_PAIRED });
+  await ctl.pollNow();
+  calls.length = 0;
+  for (const bad of ['--list', 'firefox-elsewhere', 'Chrome on workstation', '', undefined, null, 42]) {
+    await assert.rejects(ctl.unpairBrowser(bad), /no browser/, String(bad));
+  }
+  ctl.status = null;
+  await assert.rejects(ctl.unpairBrowser('chrome-work'), /no browser/, 'no status, no list, nothing sent');
+  assert.deepEqual(calls, [], 'nothing reached the remote');
 });
 
 test('overall state: every unknown input lands on unknown, not connected', () => {

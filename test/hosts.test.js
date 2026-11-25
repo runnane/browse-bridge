@@ -435,6 +435,7 @@ function stubManager() {
       pair: call('pair', { code: 'ABCD-EF12', address: pairingAddress(config) }),
       startRelay: call('startRelay', true),
       relayLog: call('relayLog', `relay log of ${config.id}`),
+      unpairBrowser: call('unpairBrowser', { ok: true, message: 'unpaired' }),
       schedulePoll: (...args) => { calls.push([config.id, 'schedulePoll', ...args]); },
       snapshot: () => ({ id: config.id, localPort: config.localPort, overall: 'stopped' }),
       changed: () => {},
@@ -547,16 +548,17 @@ test('hosts: every window action goes to the host it names and to no other; an u
   const { mgr, calls } = stubManager();
   await mgr.apply({ hosts: [sshHost('dev004', '127.0.0.1', 19989), sshHost('dev005', '127.0.0.2', 19991)] });
   const results = {};
-  for (const action of Object.keys(HOST_ACTIONS)) results[action] = await runHostAction(mgr, action, 'dev005');
+  for (const action of Object.keys(HOST_ACTIONS)) results[action] = await runHostAction(mgr, action, 'dev005', 'chrome-work');
   assert.deepEqual(calls, [
     ['dev005', 'connect'], ['dev005', 'disconnect'], ['dev005', 'setupRemote'], ['dev005', 'pair'], ['dev005', 'startRelay'], ['dev005', 'relayLog', 200],
-  ]);
+    ['dev005', 'unpairBrowser', 'chrome-work'],
+  ], 'only Unpair takes the extra argument (the browser id)');
   assert.equal(results.pair.address, '127.0.0.2:19988');
   assert.equal(results.relayLog, 'relay log of dev005');
   assert.throws(() => runHostAction(mgr, 'connect', 'ghost'), /no host with id "ghost"/);
   assert.throws(() => runHostAction(mgr, 'connect', undefined), /no host with id "undefined"/);
   assert.throws(() => runHostAction(mgr, 'constructor', 'dev004'), /no host action "constructor"/);
-  assert.equal(calls.length, 6, 'nothing else was called');
+  assert.equal(calls.length, 7, 'nothing else was called');
 });
 
 test('hosts: a snapshot taken from a change event while apply() is mid-way skips hosts not created yet (BBR-14)', async () => {

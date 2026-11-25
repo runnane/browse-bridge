@@ -661,7 +661,7 @@ function registerIpc() {
   });
   // Every per-host action names its host; an unknown id is an error, never the first host.
   for (const action of Object.keys(HOST_ACTIONS)) {
-    ipcMain.handle(action, (_e, id) => runHostAction(hosts, action, id));
+    ipcMain.handle(action, (_e, id, arg) => runHostAction(hosts, action, id, arg));
   }
   ipcMain.handle('copyDiagnostics', (_e, hideHostNames) => copyDiagnostics(hideHostNames));
   ipcMain.handle('copy', (_e, text) => clipboard.writeText(String(text)));

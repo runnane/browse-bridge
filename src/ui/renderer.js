@@ -3,7 +3,7 @@ import {
   AGGREGATE_CLASS, AGGREGATE_GLYPH, GLYPH, actionsView, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration, fmtRate,
   RELAY_LABEL, appMenuView, generalView, hostById, hostRows, hostTitle, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, pickSelected,
   transportText, withHostSnapshot, TEST_LABEL, aliasOptions, aliasWarning, parseTestForm, problemBar, testResultView, updateView,
-  browseView,
+  browseView, browsersView, unpairText, BROWSERS_NOTE,
 } from './viewmodel.js';
 
 const $ = (id) => document.getElementById(id);
@@ -272,11 +272,64 @@ function render() {
   $('nextStepText').textContent = next;
   $('sbChecked').textContent = s.statusAt ? `${hostTitle(s)} checked ${fmtTime(s.statusAt)}` : 'Not checked yet';
 
+  renderBrowsers(s);
   renderBrowse(s);
   renderTraffic(s);
   renderPairing();
   renderMessages();
 }
+
+// ---------- browsers (BBR-98) ----------
+
+/** What the Browsers list last drew, so the 1 s refresh rebuilds it only when it changed (a rebuild drops focus). */
+let browsersKey = '';
+
+/** One row per browser the relay lists; every string from the relay goes in as textContent. */
+function renderBrowsers(s) {
+  const v = browsersView(s.status);
+  $('browserEmpty').hidden = !v.empty;
+  $('browserEmpty').textContent = v.empty;
+  $('browserNote').textContent = [v.partial, v.rows.length ? BROWSERS_NOTE : ''].filter(Boolean).join(' ');
+  const key = JSON.stringify([s.id, Boolean(s.busy), v.rows]);
+  if (key === browsersKey) return;
+  browsersKey = key;
+  const list = $('browserList');
+  list.replaceChildren();
+  for (const row of v.rows) {
+    const el = $('browserRow').content.firstElementChild.cloneNode(true);
+    el.querySelector('.bname').textContent = row.name;
+    el.querySelector('.bid').textContent = row.id;
+    el.querySelector('.bdetail').textContent = ` · ${row.detail}`;
+    el.querySelector('.bcopy').onclick = () => { bridge.copy(row.id); addFlash('ok', `Copied browser id ${row.id}.`); };
+    const unpair = el.querySelector('.bunpair');
+    unpair.disabled = Boolean(s.busy);
+    unpair.onclick = () => openUnpair(row);
+    list.append(el);
+  }
+}
+
+function openUnpair(row) {
+  const s = selected();
+  if (!s) return;
+  $('unpairText').textContent = unpairText(row, s);
+  $('unpairDialog').dataset.host = s.id;
+  $('unpairDialog').dataset.browser = row.id;
+  $('unpairDialog').showModal();
+}
+$('btnUnpairCancel').onclick = () => $('unpairDialog').close();
+$('btnUnpairConfirm').onclick = async () => {
+  const d = $('unpairDialog');
+  const { host: id, browser } = d.dataset;
+  const title = hostTitle(hostById(state, id) ?? { id });
+  d.close();
+  try {
+    const r = await bridge.unpairBrowser(id, browser);
+    addFlash(r.ok ? 'ok' : 'bad', `${title}: ${r.message}`);
+  } catch (err) {
+    addFlash('bad', `${title}: ${cleanError(err.message)}`);
+  }
+  await refresh();
+};
 
 // ---------- unreadable config file (BBR-36) ----------
 

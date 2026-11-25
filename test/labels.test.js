@@ -7,7 +7,7 @@ import { Logger } from '../src/core/log.js';
 import { trayMenuModel } from '../src/core/tray.js';
 import {
   SETUP_LABEL, RELAY_LABEL, EXTENSION_NAME, TEST_LABEL, SSH_OPTIONS_LABEL, CHECK_UPDATES_LABEL, UPDATE_LABEL, CHECK_NOW_LABEL,
-  UPGRADE_BROWSE_LABEL, ROLLBACK_BROWSE_LABEL,
+  UPGRADE_BROWSE_LABEL, ROLLBACK_BROWSE_LABEL, PAIR_LABEL, UNPAIR_LABEL,
 } from '../src/core/labels.js';
 import { updateSummary } from '../src/core/updater.js';
 import { classifySshError } from '../src/core/ssherror.js';
@@ -101,4 +101,14 @@ test('labels: the README and Help use no other name for the setup and relay acti
   assert.doesNotMatch(readme, /Set up remote host|Start relay/);
   assert.doesNotMatch(html, /port pair/);
   assert.match(html, /next free loopback address/);
+});
+
+test('labels: Pair Browser and Unpair carry the names the Browsers list and its help use (BBR-98)', () => {
+  assert.equal(PAIR_LABEL, 'Pair Browser…');
+  assert.equal(UNPAIR_LABEL, 'Unpair…');
+  assert.equal(buttonText('btnPair'), PAIR_LABEL, 'the toolbar button the empty list names');
+  assert.equal(viewmodel.PAIR_LABEL, PAIR_LABEL);
+  assert.equal(html.match(/class="btn small bunpair"[^>]*>([^<]*)</)?.[1], UNPAIR_LABEL, 'the row template the renderer clones');
+  assert.ok(html.includes(`<b>${UNPAIR_LABEL}</b>`), 'Help names the button by the same text');
+  assert.ok(readme.includes(`**${UNPAIR_LABEL}**`), 'so does the README');
 });

@@ -98,6 +98,21 @@ test('integration: setup, status, pairing and proxied traffic against real brows
   assert.equal(acts.undecodedMessages, 0, 'every relay message was readable');
   assert.equal(acts.total, 0, 'pairing is not counted as an action');
 
+  // BBR-98, against the real relay: the client above closed its socket, so its browser is paired but
+  // offline. Measured on 0.1.5: the status JSON then lists no browser at all, and only `pair --list`
+  // has it. The Browsers list must still carry it, and Unpair must remove it at the relay.
+  await ctl.pollNow();
+  const listed = ctl.status?.browserList;
+  t.diagnostic(`browserList after pairing: ${JSON.stringify(listed)}`);
+  assert.deepEqual(ctl.status?.browserIds, [], 'the status JSON itself lists no offline browser (why pair --list is read)');
+  assert.equal(listed?.length, 1, `the paired browser is listed: ${JSON.stringify(listed)}`);
+  assert.equal(listed[0].connected, false, 'as not connected, not dropped');
+  assert.equal(ctl.status.browserListPartial, false);
+  const unpaired = await ctl.unpairBrowser(listed[0].id);
+  assert.equal(unpaired.ok, true, unpaired.message);
+  assert.deepEqual(await ctl.readPairedList(), [], 'the relay has no paired browser afterwards');
+  assert.ok(!logger.ring.some((e) => /[A-Z0-9]{4}-[A-Z0-9]{4}/.test(e.message)), 'no pairing code in the log');
+
   const tail = await ctl.relayLog(20);
   assert.ok(tail.length > 0 && !tail.startsWith('could not'), tail);
 });

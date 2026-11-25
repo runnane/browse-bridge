@@ -97,6 +97,11 @@
   button.btn:focus-visible { outline: none; border-color: var(--hl); box-shadow: 0 0 0 1px var(--hl); }
   button.btn.default { border-color: var(--hl); }
   button.btn:disabled { opacity: .45; }
+  button.btn.small { height: 22px; padding: 0 8px; }
+  .browserlist .brow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .browserlist .brow:last-child { border-bottom: none; }
+  .browserlist .bname { font-weight: 600; overflow-wrap: anywhere; }
+  .browserlist .bsub { grid-column: 1; color: var(--muted); overflow-wrap: anywhere; }
   input[type=text], input[type=number] { height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--view); color: var(--text); font: inherit; width: 100%; }
   input[type=text]:focus, input[type=number]:focus { outline: none; border-color: var(--hl); }
   input[type=checkbox] { accent-color: var(--hl); margin: 0 6px 0 0; }
@@ -273,6 +278,19 @@
         <span class="label">browse to run:</span><span class="value" id="browseWant">—</span>
         <span class="label">Upstream:</span><span class="value" id="browseUpstream">—</span>
       </div>
+      <!-- BBR-98: one row per browser the relay lists; rows are built in renderer.js with textContent (names come from the extension). -->
+      <div class="section">Browsers</div>
+      <div class="browserlist selectable" id="browserList"></div>
+      <template id="browserRow">
+        <div class="brow">
+          <span class="bname"></span>
+          <button class="btn small bcopy" title="Copy this browser's id: the value an agent passes as browser">Copy id</button>
+          <button class="btn small bunpair" title="Unpair this browser from the selected host; it needs a new pairing code to come back">Unpair…</button>
+          <span class="bsub"><span class="mono bid"></span><span class="bdetail"></span></span>
+        </div>
+      </template>
+      <p class="muted" id="browserEmpty" style="margin:4px 0 0" hidden></p>
+      <p class="muted" id="browserNote" style="margin:4px 0 0"></p>
       <!-- BBR-41: a newer browse is only offered; each button acts on the selected host and verifies it there. -->
       <div class="buttons" style="justify-content:flex-start;margin-top:12px">
         <button class="btn" id="btnCheckBrowse" title="Ask the npm registry for the newest stable browse now, instead of waiting for the daily check">Check Now</button>
@@ -438,6 +456,12 @@
     <div class="dlg-buttons"><button class="btn" id="btnRemoveCancel">Cancel</button><button class="btn default" id="btnRemoveConfirm">Remove</button></div>
   </dialog>
 
+  <dialog id="unpairDialog">
+    <div class="dlg-title">Unpair Browser</div>
+    <div class="dlg-body"><p style="margin:0" id="unpairText"></p></div>
+    <div class="dlg-buttons"><button class="btn default" id="btnUnpairCancel">Cancel</button><button class="btn" id="btnUnpairConfirm">Unpair</button></div>
+  </dialog>
+
   <dialog id="startOverDialog">
     <div class="dlg-title">Start Over</div>
     <div class="dlg-body"><p style="margin:0" id="startOverText"></p></div>
@@ -471,7 +495,10 @@
         A browser profile follows one host at a time: to switch, enter the other host's address in the extension.
         To use two hosts at once, pair a second profile or browser.
         One host can also have several browsers: <b>Pair Browser…</b> gives a new code even while one is connected,
-        and agents there pick a browser with the <span class="mono">browser</span> argument when they open a tab.</p>
+        and agents there pick a browser with the <span class="mono">browser</span> argument when they open a tab.
+        The Status tab's <b>Browsers</b> list shows each one by name and id, with whether it is connected and which is the default:
+        <b>Copy id</b> copies what an agent passes as <span class="mono">browser</span>, and <b>Unpair…</b> (after a confirmation)
+        removes that browser from the host; it needs a new code to come back.</p>
 
       <h3>What the states mean</h3>
       <dl class="states" id="helpStates">

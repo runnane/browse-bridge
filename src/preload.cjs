@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('bridge', {
   pair: invoke('pair'),
   startRelay: invoke('startRelay'),
   relayLog: invoke('relayLog'),
+  // BBR-98: unpairBrowser(id, browserId) → { ok, message }; only a browser id the host's last status listed is sent.
+  unpairBrowser: invoke('unpairBrowser'),
   // Host list: saveConfig(id, fields), addHost(fields), removeHost(id).
   saveConfig: invoke('saveConfig'),
   addHost: invoke('addHost'),
