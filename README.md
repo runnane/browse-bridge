@@ -71,6 +71,9 @@ the link (which browse itself does not encrypt) rides inside SSH.
 - **Pair browser:** asks the selected host's relay for a one-time code and
   shows it with **that host's** address to enter (`localhost:19988` for the
   first host, `127.0.0.2:19988` for the second, …). Codes never reach the log.
+  It works while a browser is already connected, too: the dialog stays open
+  until a browser the relay did not list before appears, so a second browser
+  or profile can pair with the same host.
 - **Status:** polls `browse status --json` over ssh (multiplexed): relay,
   extension, paired browsers, agent tabs, auto-update. Anything unmeasured
   shows as *unknown*, not healthy.
@@ -298,6 +301,12 @@ extension keeps one relay address and one connection. So:
   profile back to a host it already paired with needs no new code.
 - To use two hosts at the same moment, pair a second profile (or a second
   browser) with the other host's address.
+- To give one host two browsers (say, two agent sessions there, each driving
+  its own), pair the second browser with the **same** host: **Pair Browser…**
+  issues a fresh code even while one browser is connected. The relay then
+  lists both (`browse pair --list` on the host), and an agent picks one with
+  the `browser` argument when it opens a tab (`tabs` with `action: "new"`);
+  without it, a tab opens in the first connected browser.
 
 The window shows and edits every host. The tray shows them all at once: its
 icon is the aggregate, and each host has its own submenu.

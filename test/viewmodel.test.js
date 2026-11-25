@@ -7,7 +7,7 @@ import { ConfigStore, DEFAULTS, UNREADABLE_REFUSAL, normalizeAppConfig, pairingA
 import { Logger } from '../src/core/log.js';
 import {
   AGENT_INSTALL_COMMAND, DEFAULT_RELAY_PORT, DEFAULT_REMOTE_BROWSE, PROFILE_NOTE, UNREADABLE_REFUSAL_TEXT, agentsView, cleanError, configFailureView, errorField, fmtBytes, fmtDuration,
-  appMenuView, generalView, updateView, hostRows, logForHost, logText, pairingAddressOf, pairingView, parseGeneralForm, parseHostForm, parsePort, pickSelected, transportText, withHostSnapshot,
+  appMenuView, generalView, updateView, hostRows, logForHost, logText, pairingAddressOf, pairingRedeemed, pairingView, parseGeneralForm, parseHostForm, parsePort, pickSelected, transportText, withHostSnapshot,
   aliasOptions, aliasWarning, parseTestForm, problemBar, testResultView,
   browseView, UPGRADE_BROWSE_LABEL, ROLLBACK_BROWSE_LABEL,
 } from '../src/ui/viewmodel.js';
@@ -157,6 +157,28 @@ test('viewmodel: no dialog for an expired, dismissed or already-connected code',
   assert.equal(pairingView(twoHosts({}, { pairing: livePairing(19990) }), 'dev005', { now: Date.parse('2026-11-18T12:06:00Z') }), null);
   assert.equal(pairingView(twoHosts({}, { pairing: livePairing(19990) }), 'dev005', { now: NOW, dismissed: ['ABCD-EF12'] }), null);
   assert.equal(pairingView(twoHosts({}, { pairing: livePairing(19990), status: { extensionConnected: true } }), 'dev005', { now: NOW }), null);
+});
+
+test('viewmodel: a host that already has a browser still shows a fresh code, until a browser it did not list appears (BBR-96)', () => {
+  const pairing = { ...livePairing(19990), browsersBefore: ['brave-bug'] };
+  const withIds = (browserIds) => twoHosts({}, { pairing, status: { extensionConnected: true, browsers: browserIds.length, browserIds } });
+  const v = pairingView(withIds(['brave-bug']), 'dev005', { now: NOW });
+  assert.equal(v?.code, 'ABCD-EF12', 'the browser already connected is not the one this code is for');
+  assert.equal(v.address, '127.0.0.2:19988');
+  assert.equal(pairingView(withIds(['brave-bug', 'edge-bug']), 'dev005', { now: NOW }), null, 'a second browser paired: closed');
+  assert.equal(pairingView(withIds(['edge-bug']), 'dev005', { now: NOW }), null, 'one left and a new one came: still the new one');
+  assert.equal(pairingView(withIds([]), 'dev005', { now: NOW })?.code, 'ABCD-EF12', 'the first browser leaving redeems nothing');
+  assert.equal(pairingRedeemed({ pairing, status: { extensionConnected: true, browserIds: ['brave-bug'] } }), false);
+  assert.equal(pairingRedeemed({ pairing, status: { extensionConnected: true, browserIds: ['brave-bug', 'edge-bug'] } }), true);
+});
+
+test('viewmodel: without both browser lists, any connected browser closes the code, as before (BBR-96)', () => {
+  const show = (pairing, status) => pairingView(twoHosts({}, { pairing, status }), 'dev005', { now: NOW });
+  const live = livePairing(19990);
+  assert.equal(show({ ...live, browsersBefore: null }, { extensionConnected: true, browserIds: ['brave-bug'] }), null, 'baseline unknown');
+  assert.equal(show({ ...live, browsersBefore: ['brave-bug'] }, { extensionConnected: true, browserIds: null }), null, 'list unknown now');
+  assert.equal(show({ ...live, browsersBefore: ['brave-bug'] }, { extensionConnected: false, browserIds: null })?.code, 'ABCD-EF12');
+  assert.equal(show({ ...live, browsersBefore: null }, null)?.code, 'ABCD-EF12', 'no status at all keeps the code up');
 });
 
 // ---------- host form ----------

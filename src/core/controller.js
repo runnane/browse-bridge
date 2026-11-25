@@ -474,6 +474,12 @@ export class Controller extends EventEmitter {
   /** Ask the relay for a one-time pairing code; it is shown in the UI and never logged. */
   pair() {
     return this.withBusy('Pairing', async () => {
+      // The browsers the relay lists before the code exists (BBR-96): the dialog stays up until one
+      // outside this set appears, so a host that already has a browser can pair a second. Read
+      // fresh, before `pair`, so a quick redemption cannot land in the baseline; the last poll's
+      // list if that read fails; null (unknown) if neither has one.
+      const before = await this.readStatus();
+      const browsersBefore = before?.browserIds ?? this.status?.browserIds ?? null;
       // --wait-seconds 1: the code stays valid for 10 minutes after the command returns.
       const res = await this.transport().browse(['pair', '--wait-seconds', '1'], { controlDir: this.controlDir, timeoutMs: 30_000 });
       const p = parsePairOutput(res.stdout);
@@ -487,6 +493,7 @@ export class Controller extends EventEmitter {
         address: this.pairingAddress(),
         expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
         relayInstructions: p.instructions,
+        browsersBefore,
       };
       this.logger.info('pair', `pairing code issued; enter it with relay address ${this.pairingAddress()}`);
       if (this.wanted) this.pollNow();
