@@ -62,6 +62,37 @@ substring like `${x:2}`; only running the script (dash: "Bad substitution")
 catches it.
 `npm install` is needed only to *launch* the app (Electron).
 
+## Reading browse's options: never `<subcommand> --help` (BBR-97)
+
+Read browse's subcommands and flags from the **top-level `browse --help`
+only**. It lists every subcommand with its flags. Per-command `--help` is
+documented for *tools* (`browse navigate --help` prints real help). Most
+setup and running subcommands **ignore `--help` and run**. On 2026-11-25 an
+agent ran `browse pair --help` against the real relay: it minted a pairing
+code and blocked for the 180 s wait (BBR-96).
+
+Measured 2026-11-25 against **browse 0.1.5**. Each probe ran a copy of the
+native binary under `env -i` with a fresh throwaway `HOME`, a spare
+`OPENCODE_BROWSER_PORT` and `timeout`. Isolation was proven by `status --json`:
+the endpoint was the spare port and the executable was the copy.
+
+| `browse … --help` | what happened |
+| --- | --- |
+| `pair` | **ran**: started a relay, printed a real pairing code, blocked waiting for a browser (killed by `timeout`) |
+| `serve` | **ran**: the relay in the foreground, until killed |
+| `restart` | **ran**: started (restarted) a relay, exit 0 |
+| `update` | **ran the update path**. The probe copy is not an updatable install, so it stopped at "wasn't installed in a way browse can update". It was not measured against a real npm or self-updating install, where it may update |
+| `mcp` | **ran** the stdio MCP server (it exited on the closed stdin) |
+| `status`, `version`, `tools`, `extension` | ran, read-only: printed their normal output, not help |
+| `install`, `uninstall` | refused: `Unknown option --help`, exit 1 |
+| `set`, `set hostname` | printed the usage line, exit 2 |
+
+So **never append `--help` to `pair`, `serve`, `restart`, `update` or `mcp`**.
+`browse pair --list` is the read-only way to see paired browsers. Measured
+in the same setup, it printed the list and started no relay. If a probe does
+start a relay, stop it by the pid that holds its port (`ss -ltnp`), never by
+name. Re-measure when the pin moves past 0.1.5.
+
 ## What each test needs, and leaves behind
 
 | file | starts | ports | cleans up by |
