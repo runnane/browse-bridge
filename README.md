@@ -77,13 +77,15 @@ the link (which browse itself does not encrypt) rides inside SSH.
 - **Status:** polls `browse status --json` over ssh (multiplexed): relay,
   extension, paired browsers, agent tabs, auto-update. Anything unmeasured
   shows as *unknown*, not healthy.
-- **Browsers:** under Status, one row per browser the host's relay lists: its
+- **Browsers:** under Status, one row per browser paired with the host,
+  connected or not (from `browse pair --list`, since `browse status` lists only
+  connected ones): its
   name (as the extension reports it, e.g. "Brave on laptop"), its id, whether
   it is connected, which one is the default, and its agent tabs. The id (or
   the name) is what an agent passes as `browser` when it opens a tab, so two
   agents on one host can each drive their own browser; **Copy id** copies it.
   **Unpair…** asks first, then runs `browse pair --revoke <id>` on that host,
-  and reports success only once the relay no longer lists the browser. An
+  and reports success only once `browse pair --list` no longer lists it. An
   unpaired browser needs a new pairing code to come back. The name comes from
   browse; browse-bridge only shows it.
 - **Traffic:** bytes up/down, live rate, connections open/total/failed, and a

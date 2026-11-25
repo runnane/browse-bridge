@@ -196,16 +196,21 @@ export function pairingView(state, selectedId, { now = Date.now(), dismissed = [
 /** Under the Browsers list: what the id is for (BBR-98). */
 export const BROWSERS_NOTE = 'An agent on this host picks a browser by passing its id (or name) as browser when it opens a tab; without one it gets the default.';
 
+/** When `browse pair --list` could not be read: the status JSON lists connected browsers only (measured on browse 0.1.5). */
+export const PARTIAL_NOTE = 'Only connected browsers are shown: the host’s list of paired browsers (browse pair --list) could not be read.';
+
 /**
- * The Status page's Browsers list (BBR-98) from a host's status: { rows, empty }.
+ * The Status page's Browsers list (BBR-98) from a host's status: { rows, empty, partial }.
  * Each row is { id, name, detail }; `name` is the extension's own name,
  * else the id. A field the relay did not report reads "unknown", never healthy.
  * `empty` is the line shown instead of rows: no status yet, or no browser paired.
+ * `partial` says when only connected browsers could be listed (`pair --list` unreadable).
  */
 export function browsersView(status) {
   const list = status?.browserList;
-  if (!Array.isArray(list)) return { rows: [], empty: 'Unknown until the host’s status is read.' };
-  if (list.length === 0) return { rows: [], empty: `No browser is paired with this host: click ${PAIR_LABEL}` };
+  const partial = status?.browserListPartial ? PARTIAL_NOTE : '';
+  if (!Array.isArray(list)) return { rows: [], empty: 'Unknown until the host’s status is read.', partial: '' };
+  if (list.length === 0) return { rows: [], empty: partial ? 'No browser is connected.' : `No browser is paired with this host: click ${PAIR_LABEL}`, partial };
   const rows = list.map((b) => {
     const state = b.connected === true ? 'connected' : b.connected === false ? 'not connected' : 'connection unknown';
     const parts = [state];
@@ -213,7 +218,7 @@ export function browsersView(status) {
     if (typeof b.tabs === 'number') parts.push(`${b.tabs} tab${b.tabs === 1 ? '' : 's'}`);
     return { id: b.id, name: b.name ?? b.id, detail: parts.join(' · ') };
   });
-  return { rows, empty: '' };
+  return { rows, empty: '', partial };
 }
 
 /** The Unpair confirmation's text: names the browser and the host, and what it takes to come back. */

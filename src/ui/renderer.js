@@ -289,7 +289,7 @@ function renderBrowsers(s) {
   const v = browsersView(s.status);
   $('browserEmpty').hidden = !v.empty;
   $('browserEmpty').textContent = v.empty;
-  $('browserNote').textContent = v.rows.length ? BROWSERS_NOTE : '';
+  $('browserNote').textContent = [v.partial, v.rows.length ? BROWSERS_NOTE : ''].filter(Boolean).join(' ');
   const key = JSON.stringify([s.id, Boolean(s.busy), v.rows]);
   if (key === browsersKey) return;
   browsersKey = key;

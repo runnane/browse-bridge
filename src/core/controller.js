@@ -7,7 +7,7 @@ import { pairingAddress } from './config.js';
 import { TunnelSupervisor } from './tunnel.js';
 import { ROLLBACK_BROWSE_LABEL, SETUP_LABEL } from './labels.js';
 import { classifySshError } from './ssherror.js';
-import { SETUP_SCRIPT, parsePairOutput, parseSetupOutput, summarizeStatus, verifySetup } from './browse.js';
+import { SETUP_SCRIPT, mergeBrowsers, parsePairList, parsePairOutput, parseSetupOutput, summarizeStatus, verifySetup } from './browse.js';
 
 /** An upgrade or roll back restarts the relay; a browser that was connected gets this long to come back (BBR-41). */
 export const RECONNECT_TIMEOUT_MS = 60_000;
@@ -298,6 +298,13 @@ export class Controller extends EventEmitter {
       parsed = null;
     }
     const summary = summarizeStatus(parsed);
+    if (summary) {
+      // BBR-98: the status lists connected browsers only; `pair --list` has every paired one.
+      const paired = await this.readPairedList();
+      if (!this.wanted) return;
+      summary.browserList = mergeBrowsers(paired, summary.browserList);
+      summary.browserListPartial = paired === null && Array.isArray(summary.browserList);
+    }
     if (!summary) {
       // What to do when ssh itself failed (BBR-46); anything else is the raw last line, as before.
       const c = res.timedOut ? null : classifySshError(res.stderr, { host: this.cfg.host });
@@ -395,6 +402,17 @@ export class Controller extends EventEmitter {
       if (this.wanted) this.pollNow();
       return { ok: problems.length === 0, problems, steps, version };
     });
+  }
+
+  /** Every browser the relay has paired (`browse pair --list`, BBR-98): [{ id, name }], or null when unreadable. */
+  async readPairedList() {
+    // Never lets the status poll fail: an unreadable list is null, and the window says the list is partial.
+    try {
+      const res = await this.transport().browse(['pair', '--list'], { controlDir: this.controlDir, timeoutMs: 20_000 });
+      return res?.code === 0 ? parsePairList(res.stdout) : null;
+    } catch {
+      return null;
+    }
   }
 
   /** One `browse status --json`, summarised; null when it failed or said nothing parseable. */
@@ -516,7 +534,7 @@ export class Controller extends EventEmitter {
    * Unpair one browser from this host's relay (BBR-98): `browse pair --revoke <id>`.
    * Only an id the last status poll listed is sent, so the window can never name
    * an arbitrary browser (or a flag) to the remote. Verified at the relay: ok only
-   * when a fresh status read no longer lists the id. Returns { ok, message }.
+   * when a fresh `pair --list` no longer lists the id. Returns { ok, message }.
    */
   unpairBrowser(browserId) {
     const listed = (this.status?.browserList ?? []).find((b) => b.id === browserId);
@@ -532,10 +550,10 @@ export class Controller extends EventEmitter {
         if (this.wanted) this.pollNow();
         return { ok: false, message };
       }
-      const after = await this.readStatus();
-      const ids = after?.browserList?.map((b) => b.id) ?? null;
+      const after = await this.readPairedList();
+      const ids = after?.map((b) => b.id) ?? null;
       let result;
-      if (!ids) result = { ok: false, message: `unpair of ${label} sent, but the relay's browser list could not be read to confirm it` };
+      if (!ids) result = { ok: false, message: `unpair of ${label} sent, but the relay's paired list could not be read to confirm it` };
       else if (ids.includes(browserId)) result = { ok: false, message: `unpair of ${label} sent, but the relay still lists it` };
       else result = { ok: true, message: `unpaired ${label}; it needs a new pairing code to come back` };
       if (result.ok) this.logger.info('pair', result.message);
