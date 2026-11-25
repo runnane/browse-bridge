@@ -268,6 +268,17 @@ export function parsePairOutput(stdout) {
 }
 
 /**
+ * The ids of the browsers a relay lists (`extension.browsers[]`, by id, else
+ * name), or null when there is no list or any entry has neither: a partial
+ * list cannot say which browser is new, so it is unknown, not empty (BBR-96).
+ */
+export function browserIds(browsers) {
+  if (!Array.isArray(browsers)) return null;
+  const ids = browsers.map((b) => (b && typeof b === 'object' ? b.id ?? b.name ?? null : null));
+  return ids.every((id) => typeof id === 'string' && id) ? ids : null;
+}
+
+/**
  * Collapse `browse status --json` into what the UI shows. Every field that is
  * absent stays null; the UI renders null as "unknown", never as healthy.
  */
@@ -281,6 +292,7 @@ export function summarizeStatus(s) {
     extensionConnected: typeof (ext.connected ?? s.connected) === 'boolean' ? (ext.connected ?? s.connected) : null,
     pairingState: ext.pairingState ?? s.pairingState ?? null,
     browsers: Array.isArray(ext.browsers) ? ext.browsers.length : null,
+    browserIds: browserIds(ext.browsers),
     activeTargets: typeof ext.activeTargets === 'number' ? ext.activeTargets : null,
     tabs: Array.isArray(s.tabs) ? s.tabs.length : null,
     autoUpdate: s.autoUpdate?.effective ?? null,

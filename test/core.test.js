@@ -415,6 +415,47 @@ test('browse: status summary keeps unmeasured fields null, never healthy', () =>
   assert.equal(endpointPort('garbage'), null);
 });
 
+test('browse: status summary lists browser ids by id, else name, and unknown when any entry has neither (BBR-96)', () => {
+  const withBrowsers = (browsers) => summarizeStatus({ ...STATUS_UP, extension: { ...STATUS_UP.extension, browsers } });
+  assert.deepEqual(withBrowsers([]).browserIds, []);
+  assert.deepEqual(withBrowsers([{ id: 'brave-bug', name: 'Brave on bug', connected: true }, { name: 'Edge' }]).browserIds, ['brave-bug', 'Edge']);
+  assert.equal(withBrowsers([{ id: 'brave-bug' }, { connected: true }]).browserIds, null, 'a partial list cannot say which browser is new');
+  assert.equal(withBrowsers([{ id: 'brave-bug' }, null]).browserIds, null);
+  assert.equal(summarizeStatus(STATUS_DOWN).browserIds, null, 'no list is unknown, not none');
+});
+
+test('controller: Pair Browser records the browsers the relay listed before the code was issued (BBR-96)', async () => {
+  const logger = new Logger();
+  const ctl = new Controller({ config: normalizeConfig({ host: 'dev004', localAddress: '127.0.0.2' }), logger });
+  const calls = [];
+  const listed = { ...STATUS_UP, extension: { ...STATUS_UP.extension, connected: true, browsers: [{ id: 'brave-bug', connected: true }] } };
+  ctl.transport = () => ({
+    kind: 'fake',
+    browse: async (args) => {
+      calls.push(args[0]);
+      const stdout = args[0] === 'status' ? JSON.stringify(listed) : args[0] === 'pair' ? PAIR_OUT : '';
+      return { code: 0, signal: null, stdout, stderr: '', timedOut: false };
+    },
+    closeMaster: async () => null,
+  });
+  ctl.status = { extensionConnected: true, browserIds: ['stale-poll'] };
+  const p = await ctl.pair();
+  assert.deepEqual(calls, ['status', 'pair'], 'the baseline is read before the code exists, so a quick redemption is not in it');
+  assert.equal(p.code, 'YCGB-NSHE');
+  assert.deepEqual(p.browsersBefore, ['brave-bug'], 'the fresh read, not the last poll');
+  assert.ok(!logger.ring.some((e) => e.message.includes('YCGB-NSHE')), 'code never logged');
+
+  // That read failing: the last poll's list; neither: unknown.
+  ctl.transport = () => ({
+    kind: 'fake',
+    browse: async (args) => ({ code: args[0] === 'pair' ? 0 : 1, signal: null, stdout: args[0] === 'pair' ? PAIR_OUT : '', stderr: '', timedOut: false }),
+    closeMaster: async () => null,
+  });
+  assert.deepEqual((await ctl.pair()).browsersBefore, ['stale-poll']);
+  ctl.status = null;
+  assert.equal((await ctl.pair()).browsersBefore, null);
+});
+
 test('overall state: every unknown input lands on unknown, not connected', () => {
   const base = { configured: true, wanted: true, tunnel: 'up', warnings: [] };
   assert.equal(computeOverall({ ...base, configured: false }), 'unconfigured');

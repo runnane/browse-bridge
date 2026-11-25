@@ -20,7 +20,7 @@ export const AGGREGATE_CLASS = Object.freeze({ none: 'unconfigured', allUp: 'rea
 
 /** The one line the pairing dialog carries (BBR-11's finding: the extension keeps one relay address per profile). */
 export const PROFILE_NOTE =
-  'A browser profile follows one host at a time. Switching a profile to another host’s address needs no new code once it has paired there, and a second profile can use another host at the same time.';
+  'A browser profile follows one host at a time. Switching a profile to another host’s address needs no new code once it has paired there, and a second profile can use another host at the same time. Several browsers can pair with one host; agents there pick one with the browser argument.';
 
 // ---------- formatting ----------
 
@@ -154,6 +154,20 @@ export function logText(e) {
 // ---------- pairing ----------
 
 /**
+ * Whether a host's live code has been used (BBR-96). With the browser ids the
+ * relay listed when the code was issued and the ones it lists now, only a
+ * browser outside that first set counts: one already connected is not the
+ * browser this code is for. Without both lists, any connected browser counts,
+ * as it always has.
+ */
+export function pairingRedeemed(h) {
+  const before = h?.pairing?.browsersBefore;
+  const nowIds = h?.status?.browserIds;
+  if (Array.isArray(before) && Array.isArray(nowIds)) return nowIds.some((id) => !before.includes(id));
+  return h?.status?.extensionConnected === true;
+}
+
+/**
  * The pairing dialog for the host with a live code: the selected host's when
  * it has one, else the first host's that has. `dismissed` holds the codes the
  * user closed (any host's), so closing one host's dialog never brings back
@@ -163,7 +177,7 @@ export function logText(e) {
 export function pairingView(state, selectedId, { now = Date.now(), dismissed = [] } = {}) {
   const closed = new Set(dismissed);
   const live = (h) => h?.pairing && new Date(h.pairing.expiresAt).getTime() > now
-    && h.status?.extensionConnected !== true && !closed.has(h.pairing.code);
+    && !pairingRedeemed(h) && !closed.has(h.pairing.code);
   const hosts = state?.hosts ?? [];
   const h = [hostById(state, selectedId), ...hosts].find(live);
   if (!h) return null;
