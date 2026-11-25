@@ -5,6 +5,7 @@ Electron tray app; see README.md for what it does. Tracker project **BBR** (`bro
 - **Logic lives in `src/core/` as plain Node modules**; `src/main.js` is a thin Electron shell. Keep it that way — everything in `core/` is tested without a display.
 - **Gates:** the command in `gates.all` of [`.agents/repo.json`](.agents/repo.json) — do not copy it here. Run it with `BROWSE_BIN=<path to a browse 0.1.5 binary>` so the integration test is not skipped, and say so if it was.
 - **The integration test and the headless smoke run start a real browse relay.** They stop it by the pid browse reports; if a run is killed, find the relay by its port (`ss -ltnp`) and signal that pid — never by name.
+- **Read browse's options from the top-level `browse --help` only.** `pair`, `serve`, `restart`, `update` and `mcp` ignore `--help` and run: `pair --help` mints a real pairing code and blocks. The measured table is in [`.agents/gates.md`](.agents/gates.md) (BBR-97).
 - **The tray cannot be tested headlessly** (GTK needs a display). `BB_SMOKE_OUT` renders the window only.
 - **Never put a pairing code in a log** — `Logger` redacts `XXXX-XXXX`; a test pins it.
 - **No test may reach a real ssh.** `npm test` / `npm run gates` set `BB_FORBID_SSH=1`, and `src/core/exec.js` then refuses any ssh/scp/sftp (including the tunnel's default spawner) whose destination is not loopback; stub the transport instead. Running `node --test` directly bypasses the guard, so use the npm scripts. Detail in [`.agents/gates.md`](.agents/gates.md).
