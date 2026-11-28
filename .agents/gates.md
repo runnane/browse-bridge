@@ -53,9 +53,13 @@ Is the pin still safe against upstream's newest stable? `node scripts/check-brow
 The gates need node plus the system tools the setup script uses (bash, sh,
 tar, gzip, coreutils, grep, sed, awk, openssl), all from the host, nothing from
 `node_modules`, so a fresh worktree is enough (`worktreeSafe: true`).
-`/bin/sh` must not be bash (a test refuses it): every `script()` body runs
-remotely under `sh -s` (BBR-57), and the POSIX runs are only evidence where
-`sh` is dash. busybox is optional; where present, the parse check and
+The POSIX `sh` runs need a shell that is not bash: every `script()` body runs
+remotely under `sh -s` (BBR-57), and those runs are only evidence where `sh`
+is dash. `test/support/posix-sh.js` picks it once, at import: `/bin/sh` where
+that is not bash (Debian, Ubuntu, CI), else `dash` from `PATH` (Arch, whose
+`/bin/sh` is bash). Install the `dash` package there; it does not have to
+become `/bin/sh` (BBR-95). With neither, the "POSIX sh is not bash" test fails
+and names the fix; nothing is skipped. busybox is optional; where present, the parse check and
 `test/setup-tilde.test.js` also run under its ash, Alpine's `sh`. It cannot run
 the whole-script cases: ash finds its own `uname`, `od`, `tar` applets whatever
 `PATH` says, so the fakes would not hold. Note that `sh -n` passes a bash

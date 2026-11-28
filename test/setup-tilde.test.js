@@ -5,6 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, wri
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SETUP_SCRIPT, parseSetupOutput } from '../src/core/browse.js';
+import { POSIX_SH } from './support/posix-sh.js';
 
 const PIN = '0.1.4';
 // The only tools SETUP_SCRIPT needs once browse is installed. npm, ssh and browse are never linked.
@@ -19,9 +20,10 @@ esac
 `;
 
 // BBR-57: exec.js runs SETUP_SCRIPT under `sh`; on Alpine that is busybox ash,
-// on Debian dash. bash stays covered for hosts whose sh is bash.
+// on Debian dash. bash stays covered for hosts whose sh is bash. POSIX_SH is
+// /bin/sh, or dash where /bin/sh is bash (BBR-95; setup-script.test.js guards it).
 const BUSYBOX = ['/usr/bin/busybox', '/bin/busybox'].find((p) => existsSync(p)) ?? null;
-const SHELLS = [['/bin/sh'], ['/usr/bin/bash'], ...(BUSYBOX ? [[BUSYBOX, 'sh']] : [])];
+const SHELLS = [[POSIX_SH], ['/usr/bin/bash'], ...(BUSYBOX ? [[BUSYBOX, 'sh']] : [])];
 
 function runSetup(t, [shell, ...pre], browsePath) {
   const root = mkdtempSync(join(tmpdir(), 'bb-tilde-'));

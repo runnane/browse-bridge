@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { INSTALL_FUNCS, SETUP_SCRIPT, parseSetupOutput, verifySetup } from '../src/core/browse.js';
 import { relayLogScript } from '../src/core/controller.js';
 import { SCRIPT_SHELL } from '../src/core/exec.js';
+import { POSIX_SH, POSIX_SH_ERROR } from './support/posix-sh.js';
 
 // Every temp root this file makes, removed once all its tests have run (BBR-61).
 // runSetup returns paths inside its root that the assertions read, so removal
@@ -38,15 +39,17 @@ function real(tool) {
   throw new Error(`test needs ${tool} on this machine`);
 }
 const BASH = real('bash');
-const SH = '/bin/sh';
+// BBR-95: /bin/sh where it is not bash, else dash from PATH (test/support/posix-sh.js).
+const SH = POSIX_SH;
 // BBR-57: exec.js runs every script() body under `sh`, and a busybox-only host
-// has no bash, so the whole script runs under /bin/sh (dash here) as well as bash.
+// has no bash, so the whole script runs under a POSIX sh (dash) as well as bash.
 // (busybox ash cannot run these: it finds its own applets for uname, od, tar...
 // whatever PATH says, so the fakes and the "missing tool" cases would not hold.
 // test/setup-tilde.test.js and the parse check below run it.)
 const SHELLS = [SH, BASH];
 const BUSYBOX = ['/usr/bin/busybox', '/bin/busybox'].find((p) => existsSync(p)) ?? null;
-test('setup script: /bin/sh is not bash, so the sh runs below are not bash in disguise', () => {
+test('setup script: the POSIX sh is not bash, so the sh runs below are not bash in disguise', () => {
+  assert.equal(POSIX_SH_ERROR, null);
   const r = spawnSync(SH, ['-c', 'echo "${BASH_VERSION:-none}"'], { encoding: 'utf8' });
   assert.equal(r.stdout.trim(), 'none', `${SH} is bash here; the POSIX runs would prove nothing`);
 });
