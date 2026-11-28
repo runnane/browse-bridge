@@ -4,7 +4,12 @@ import { dirname, join } from 'node:path';
 
 import { iconPng } from '../icons.js';
 
-const ENTRY_FILE = 'browse-bridge.desktop';
+/**
+ * The file name of both entries the app writes. package.json `desktopName` must
+ * equal it: Electron sets the window's Wayland app_id / X11 WM_CLASS from
+ * `desktopName`, and that is how Plasma ties a running window to this entry (BBR-81).
+ */
+export const ENTRY_FILE = 'browse-bridge.desktop';
 /** hicolor sizes the application-menu entry installs its icon at. */
 export const MENU_ICON_SIZES = [48, 128];
 

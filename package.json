@@ -5,6 +5,7 @@
   "description": "Tray app that bridges a remote agent host's browse relay to the local browser over SSH, with status, traffic counters and logs.",
   "type": "module",
   "main": "src/main.js",
+  "desktopName": "browse-bridge.desktop",
   "author": {
     "name": "runnane",
     "url": "https://github.com/runnane"
@@ -51,6 +52,7 @@
         }
       ],
       "icon": "build/icon.png",
+      "syncDesktopName": true,
       "category": "Network",
       "artifactName": "browse-bridge-${arch}.AppImage"
     },
