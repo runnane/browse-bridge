@@ -31,6 +31,7 @@ for the gates to run without `BROWSE_BIN`, and say so whenever they do.
 
 | date | call | verdict |
 | --- | --- | --- |
+| 2026-11-28 | the plain step for 0.1.5, alone, into the job's tmp dir instead of `/tmp`, attended orchestrator session (BBR-81) | passed |
 | 2026-11-24 | the plain step for 0.1.5, alone, unattended orchestrator session not worktree-isolated (BBR-89 sweep) | passed |
 | 2026-11-23 | the plain step for 0.1.4, alone (BBR-76) | refused, *Undermining Oversight* |
 | 2026-11-23 | the plain step for 0.1.5, alone (BBR-76) | refused, *Undermining Oversight* |
@@ -126,7 +127,10 @@ signal that pid. Never kill by name. A leaked ssh ControlMaster shows up as
 
 ## What green does not cover
 
-- **The tray, notifications and autostart on Plasma.** GTK needs a display.
+- **The tray, notifications and autostart on Plasma.** GTK needs a display, so
+  no gate reaches them. A **virtual Plasma session** (section below) covers the
+  tray, its menu, task-manager grouping and the hidden start on a box with no
+  display.
   `BB_SMOKE_OUT=<prefix> bin/browse-bridge --ozone-platform=headless` renders
   the window only, and skips the tray. `BB_THEME=dark|light`,
   `BB_SMOKE_SIZE=WxH` and `BB_SMOKE_PAIR=1` (needs a local relay config) vary
@@ -189,6 +193,52 @@ signal that pid. Never kill by name. A leaked ssh ControlMaster shows up as
   AppImage, and only the autostart one has `--hidden`.
 - **The real dev004 tunnel and real Edge pairing.** Neither is reachable from
   the dev box. The owner verifies those.
+
+## A virtual Plasma session (BBR-81)
+
+A box with Plasma 6 installed but no display can run the real KWin, plasmashell
+and system tray headless, and drive the app's tray over D-Bus. It is **not a
+logged-in session**: no ksmserver, so login-time autostart and notifications
+are not exercised as they are at login. Say "virtual Plasma session" beside
+every observation made this way.
+
+**Start order**, all inside one `dbus-run-session`, with a throwaway `HOME`
+and `XDG_*_HOME` (plasmashell and the app both write there). Every step below
+was a measured failure on 2026-11-28 without it:
+
+1. `kwin_wayland --virtual --no-lockscreen --xwayland --width 1600 --height 1000 --socket <name>`.
+   Without `--no-lockscreen` the session starts **locked** (the greeter is
+   kwin's child, and `kscreenlockerrc` `Autolock=false` does not stop it).
+2. `kded6`. It hosts `org.kde.StatusNotifierWatcher`; without it no tray item
+   can register.
+3. `/usr/lib/kactivitymanagerd`. Without it plasmashell logs "Aborting shell
+   load: The activity manager daemon (kactivitymanagerd) is not running" and
+   draws nothing.
+4. `plasmashell --no-respawn`, after `gdbus wait --session org.kde.StatusNotifierWatcher`
+   and `org.kde.ActivityManager`.
+
+Then launch the app with `WAYLAND_DISPLAY=<name>` and `--ozone-platform=wayland`.
+Record every pid you spawn and stop each one by pid.
+
+**What to read, and how:**
+- Screenshots: `spectacle -b -n -f -o <file>.png` (works on the virtual output).
+- The window's `app_id`: run with `WAYLAND_DEBUG=1` and grep `set_app_id(`.
+  KWin's view: `qdbus6 --literal org.kde.KWin /WindowsRunner org.kde.krunner1.Match browse`
+  gives the window uuid; `org.kde.KWin.getWindowInfo <uuid>` shows
+  `desktopFile` and `resourceClass`.
+- Grouping: install the menu entry with `setAppMenu` into the throwaway
+  `XDG_DATA_HOME`, run `kbuildsycoca6`, and pin `applications:browse-bridge.desktop`
+  as the task manager's `launchers` via `org.kde.PlasmaShell.evaluateScript`.
+  One task-manager button means the window grouped. **Negative control:** the
+  same entry renamed `bb-other.desktop` and pinned gives two buttons.
+- The tray: `RegisteredStatusNotifierItems` on the watcher; the item's
+  `ToolTip`, `Status` and `Menu` properties; the menu with
+  `com.canonical.dbusmenu.GetLayout -- 0 -1 '[...]'`; and a click with
+  `com.canonical.dbusmenu.Event -- <id> clicked '<0>' 0`, which is what
+  Plasma sends. Electron rebuilds the menu on a change, so ids move: re-read
+  the layout before each click.
+- The hidden start needs a configured host. With no host configured the app
+  shows its window even with `--hidden` (by design, `main.js`).
 
 ## CI
 
